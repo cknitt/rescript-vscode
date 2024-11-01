@@ -60,9 +60,7 @@ type error =
   | Unbound_constructor of Longident.t
   | Unbound_label of Longident.t
   | Unbound_module of Longident.t
-  | Unbound_class of Longident.t
   | Unbound_modtype of Longident.t
-  | Unbound_cltype of Longident.t
   | Ill_typed_functor_application of Longident.t
   | Illegal_reference_to_recursive_module
   | Access_functor_as_structure of Longident.t
@@ -104,15 +102,11 @@ val find_all_labels :
   (label_description * (unit -> unit)) list
 val find_value :
   Env.t -> Location.t -> Longident.t -> Path.t * value_description
-val find_class :
-  Env.t -> Location.t -> Longident.t -> Path.t * class_declaration
 val find_module :
   Env.t -> Location.t -> Longident.t -> Path.t * module_declaration
 val lookup_module : ?load:bool -> Env.t -> Location.t -> Longident.t -> Path.t
 val find_modtype :
   Env.t -> Location.t -> Longident.t -> Path.t * modtype_declaration
-val find_class_type :
-  Env.t -> Location.t -> Longident.t -> Path.t * class_type_declaration
 
 val unbound_constructor_error : Env.t -> Longident.t Location.loc -> 'a
 val unbound_label_error : Env.t -> Longident.t Location.loc -> 'a

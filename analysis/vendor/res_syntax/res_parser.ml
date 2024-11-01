@@ -22,7 +22,6 @@ type t = {
   mutable diagnostics: Diagnostics.t list;
   mutable comments: Comment.t list;
   mutable regions: region_status ref list;
-  mutable uncurried_config: Config.uncurried;
 }
 
 let err ?start_pos ?end_pos p error =
@@ -106,6 +105,13 @@ let next_template_literal_token p =
   p.start_pos <- start_pos;
   p.end_pos <- end_pos
 
+let next_regex_token p =
+  let start_pos, end_pos, token = Scanner.scan_regex p.scanner in
+  p.token <- token;
+  p.prev_end_pos <- p.end_pos;
+  p.start_pos <- start_pos;
+  p.end_pos <- end_pos
+
 let check_progress ~prev_end_pos ~result p =
   if p.end_pos == prev_end_pos then None else Some result
 
@@ -124,7 +130,6 @@ let make ?(mode = ParseForTypeChecker) src filename =
       diagnostics = [];
       comments = [];
       regions = [ref Report];
-      uncurried_config = !Config.uncurried;
     }
   in
   parser_state.scanner.err <-
@@ -173,7 +178,6 @@ let lookahead p callback =
   let errors = p.errors in
   let diagnostics = p.diagnostics in
   let comments = p.comments in
-  let uncurried_config = p.uncurried_config in
 
   let res = callback p in
 
@@ -192,6 +196,5 @@ let lookahead p callback =
   p.errors <- errors;
   p.diagnostics <- diagnostics;
   p.comments <- comments;
-  p.uncurried_config <- uncurried_config;
 
   res

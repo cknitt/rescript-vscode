@@ -34,11 +34,6 @@ type symptom =
   | Modtype_infos of Ident.t * modtype_declaration * modtype_declaration
   | Modtype_permutation
   | Interface_mismatch of string * string
-  | Class_type_declarations of
-      Ident.t
-      * class_type_declaration
-      * class_type_declaration
-      * Ctype.class_match_failure list
   | Unbound_modtype_path of Path.t
   | Unbound_module_path of Path.t
   | Invalid_module_alias of Path.t
@@ -84,17 +79,6 @@ let extension_constructors ~loc env cxt subst id ext1 ext2 =
   if Includecore.extension_constructors ~loc env id ext1 ext2 then ()
   else raise (Error [(cxt, env, Extension_constructors (id, ext1, ext2))])
 
-(* Inclusion between class declarations *)
-
-let class_type_declarations ~loc ~old_env env cxt subst id decl1 decl2 =
-  let decl2 = Subst.cltype_declaration subst decl2 in
-  match Includeclass.class_type_declarations ~loc env decl1 decl2 with
-  | [] -> ()
-  | reason ->
-    raise
-      (Error
-         [(cxt, old_env, Class_type_declarations (id, decl1, decl2, reason))])
-
 (* Expand a module type identifier when possible *)
 
 exception Dont_match
@@ -128,7 +112,6 @@ type field_desc =
   | Field_typext of string
   | Field_module of string
   | Field_modtype of string
-  | Field_classtype of string
 
 let kind_of_field_desc = function
   | Field_value _ -> "value"
@@ -136,7 +119,6 @@ let kind_of_field_desc = function
   | Field_typext _ -> "extension constructor"
   | Field_module _ -> "module"
   | Field_modtype _ -> "module type"
-  | Field_classtype _ -> "class type"
 
 let item_ident_name = function
   | Sig_value (id, d) -> (id, d.val_loc, Field_value (Ident.name id))
@@ -145,14 +127,13 @@ let item_ident_name = function
   | Sig_module (id, d, _) -> (id, d.md_loc, Field_module (Ident.name id))
   | Sig_modtype (id, d) -> (id, d.mtd_loc, Field_modtype (Ident.name id))
   | Sig_class () -> assert false
-  | Sig_class_type (id, d, _) ->
-    (id, d.clty_loc, Field_classtype (Ident.name id))
+  | Sig_class_type () -> assert false
 
 let is_runtime_component = function
   | Sig_value (_, {val_kind = Val_prim _})
   | Sig_type (_, _, _)
   | Sig_modtype (_, _)
-  | Sig_class_type (_, _, _) ->
+  | Sig_class_type () ->
     false
   | Sig_value (_, _)
   | Sig_typext (_, _, _)
@@ -318,10 +299,9 @@ and signatures ~loc env cxt subst sig1 sig2 =
       | Sig_module (i, _, _)
       | Sig_typext (i, _, _)
       | Sig_modtype (i, _)
-      | Sig_class_type (i, _, _)
       | Sig_type (i, _, _) ->
         Ident.name i
-      | Sig_class () -> assert false
+      | Sig_class () | Sig_class_type () -> assert false
     in
     List.fold_right
       (fun item fields ->
@@ -380,7 +360,8 @@ and signatures ~loc env cxt subst sig1 sig2 =
           | Sig_module _ -> Subst.add_module id2 (Pident id1) subst
           | Sig_modtype _ ->
             Subst.add_modtype id2 (Mty_ident (Pident id1)) subst
-          | Sig_value _ | Sig_typext _ | Sig_class _ | Sig_class_type _ -> subst
+          | Sig_value _ | Sig_typext _ | Sig_class _ | Sig_class_type () ->
+            subst
         in
         pair_components new_subst ((item1, item2, pos1) :: paired) unpaired rem
       | exception Not_found ->
@@ -418,11 +399,8 @@ and signature_components ~loc old_env env cxt subst paired =
   | (Sig_modtype (id1, info1), Sig_modtype (_id2, info2), _pos) :: rem ->
     modtype_infos ~loc env cxt subst id1 info1 info2;
     comps_rec rem
-  | (Sig_class _, Sig_class _, _) :: _ -> assert false
-  | (Sig_class_type (id1, info1, _), Sig_class_type (_id2, info2, _), _pos)
-    :: rem ->
-    class_type_declarations ~loc ~old_env env cxt subst id1 info1 info2;
-    comps_rec rem
+  | (Sig_class (), Sig_class (), _) :: _ -> assert false
+  | (Sig_class_type (), Sig_class_type (), _pos) :: _ -> assert false
   | _ -> assert false
 
 and module_declarations ~loc env cxt subst id1 md1 md2 =
@@ -574,14 +552,6 @@ let include_err ~env ppf = function
   | Interface_mismatch (impl_name, intf_name) ->
     fprintf ppf "@[The implementation %s@ does not match the interface %s:"
       impl_name intf_name
-  | Class_type_declarations (id, d1, d2, reason) ->
-    fprintf ppf
-      "@[<hv 2>Class type declarations do not match:@ %a@;\
-       <1 -2>does not match@ %a@]@ %a"
-      (Printtyp.cltype_declaration id)
-      d1
-      (Printtyp.cltype_declaration id)
-      d2 Includeclass.report_error reason
   | Unbound_modtype_path path ->
     fprintf ppf "Unbound module type %a" Printtyp.path path
   | Unbound_module_path path ->

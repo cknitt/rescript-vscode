@@ -148,7 +148,7 @@ type summary =
   | Env_module of summary * Ident.t * module_declaration
   | Env_modtype of summary * Ident.t * modtype_declaration
   | Env_class of unit
-  | Env_cltype of summary * Ident.t * class_type_declaration
+  | Env_cltype of unit
   | Env_open of summary * Path.t
   | Env_functor_arg of summary * Ident.t
   | Env_constraints of summary * type_declaration PathMap.t
@@ -399,8 +399,6 @@ type t = {
   modules: (Subst.t * module_declaration, module_declaration) EnvLazy.t IdTbl.t;
   modtypes: modtype_declaration IdTbl.t;
   components: module_components IdTbl.t;
-  classes: class_declaration IdTbl.t;
-  cltypes: class_type_declaration IdTbl.t;
   functor_args: unit Ident.tbl;
   summary: summary;
   local_constraints: type_declaration PathMap.t;
@@ -431,9 +429,7 @@ and structure_components = {
   mutable comp_modules:
     (Subst.t * module_declaration, module_declaration) EnvLazy.t comp_tbl;
   mutable comp_modtypes: modtype_declaration comp_tbl;
-  mutable comp_components: module_components comp_tbl;
-  comp_classes: class_declaration comp_tbl; (* warning -69*)
-  mutable comp_cltypes: class_type_declaration comp_tbl;
+  mutable comp_components: module_components comp_tbl; (* warning -69*)
 }
 
 and functor_components = {
@@ -471,15 +467,11 @@ let check_shadowing env = function
   | `Type (Some _) -> Some "type"
   | `Module (Some _) | `Component (Some _) -> Some "module"
   | `Module_type (Some _) -> Some "module type"
-  | `Class (Some _) -> Some "class"
-  | `Class_type (Some _) -> Some "class type"
   | `Constructor _ | `Label _
   | `Value None
   | `Type None
   | `Module None
   | `Module_type None
-  | `Class None
-  | `Class_type None
   | `Component None ->
     None
 
@@ -496,8 +488,6 @@ let empty =
     modules = IdTbl.empty;
     modtypes = IdTbl.empty;
     components = IdTbl.empty;
-    classes = IdTbl.empty;
-    cltypes = IdTbl.empty;
     summary = Env_empty;
     local_constraints = PathMap.empty;
     gadt_instances = [];
@@ -523,14 +513,13 @@ let is_ident = function
   | Pdot _ | Papply _ -> false
 
 let is_local_ext = function
-  | {cstr_tag = Cstr_extension (p, _)} -> is_ident p
+  | {cstr_tag = Cstr_extension p} -> is_ident p
   | _ -> false
 
 let diff env1 env2 =
   IdTbl.diff_keys env1.values env2.values
   @ TycompTbl.diff_keys is_local_ext env1.constrs env2.constrs
   @ IdTbl.diff_keys env1.modules env2.modules
-  @ IdTbl.diff_keys env1.classes env2.classes
 
 type can_load_cmis = Can_load_cmis | Cannot_load_cmis of EnvLazy.log
 
@@ -594,8 +583,6 @@ let empty_structure =
       comp_modules = Tbl.empty;
       comp_modtypes = Tbl.empty;
       comp_components = Tbl.empty;
-      comp_classes = Tbl.empty;
-      comp_cltypes = Tbl.empty;
     }
 
 let get_components c =
@@ -831,10 +818,6 @@ let find_value = find (fun env -> env.values) (fun sc -> sc.comp_values)
 and find_type_full = find (fun env -> env.types) (fun sc -> sc.comp_types)
 
 and find_modtype = find (fun env -> env.modtypes) (fun sc -> sc.comp_modtypes)
-
-and find_class = find (fun env -> env.classes) (fun sc -> sc.comp_classes)
-
-and find_cltype = find (fun env -> env.cltypes) (fun sc -> sc.comp_cltypes)
 
 let type_of_cstr path = function
   | {cstr_inlined = Some d; _} ->
@@ -1073,11 +1056,8 @@ and lookup_module ~load ?loc lid env : Path.t =
         (* see #5965 *)
         raise Recmodule
       | Mty_alias (_, Path.Pident id) ->
-        if
-          !Config.bs_only
-          && (not !Clflags.transparent_modules)
-          && Ident.persistent id
-        then find_pers_struct (Ident.name id) |> ignore
+        if (not !Clflags.transparent_modules) && Ident.persistent id then
+          find_pers_struct (Ident.name id) |> ignore
       | _ -> ());
       report_deprecated ?loc p
         (Builtin_attributes.deprecated_of_attrs md_attributes);
@@ -1172,8 +1152,6 @@ let lookup_all_labels =
 let lookup_type = lookup (fun env -> env.types) (fun sc -> sc.comp_types)
 let lookup_modtype =
   lookup (fun env -> env.modtypes) (fun sc -> sc.comp_modtypes)
-let lookup_class = lookup (fun env -> env.classes) (fun sc -> sc.comp_classes)
-let lookup_cltype = lookup (fun env -> env.cltypes) (fun sc -> sc.comp_cltypes)
 
 let copy_types l env =
   let f desc =
@@ -1304,20 +1282,6 @@ let lookup_all_labels ?loc lid env =
     in
     List.map (fun (lbl, use) -> (lbl, wrap_use lbl use)) lbls
   with Not_found when is_lident lid -> []
-
-let lookup_class ?loc lid env =
-  let ((_, desc) as r) = lookup_class ?loc lid env in
-  (* special support for Typeclass.unbound_class *)
-  if Path.name desc.cty_path = "" then ignore (lookup_type ?loc lid env)
-  else mark_type_path env desc.cty_path;
-  r
-
-let lookup_cltype ?loc lid env =
-  let ((_, desc) as r) = lookup_cltype ?loc lid env in
-  if Path.name desc.clty_path = "" then ignore (lookup_type ?loc lid env)
-  else mark_type_path env desc.clty_path;
-  mark_type_path env desc.clty_path;
-  r
 
 (* Iter on an environment (ignoring the body of functors and
    not yet evaluated structures) *)
@@ -1531,10 +1495,7 @@ let rec prefix_idents root pos sub = function
     in
     (p :: pl, final_sub)
   | Sig_class _ :: _ -> assert false
-  | Sig_class_type (id, _, _) :: rem ->
-    let p = Pdot (root, Ident.name id, nopos) in
-    let pl, final_sub = prefix_idents root pos (Subst.add_type id p sub) rem in
-    (p :: pl, final_sub)
+  | Sig_class_type _ :: _ -> assert false
 
 let prefix_idents root sub sg =
   if sub = Subst.identity then (
@@ -1573,8 +1534,6 @@ and components_of_module_maker (env, sub, path, mty) =
         comp_modules = Tbl.empty;
         comp_modtypes = Tbl.empty;
         comp_components = Tbl.empty;
-        comp_classes = Tbl.empty;
-        comp_cltypes = Tbl.empty;
       }
     in
     let pl, sub = prefix_idents path sub sg in
@@ -1634,9 +1593,7 @@ and components_of_module_maker (env, sub, path, mty) =
             Tbl.add (Ident.name id) (decl', nopos) c.comp_modtypes;
           env := store_modtype id decl !env
         | Sig_class () -> assert false
-        | Sig_class_type (id, decl, _) ->
-          let decl' = Subst.cltype_declaration sub decl in
-          c.comp_cltypes <- Tbl.add (Ident.name id) (decl', !pos) c.comp_cltypes)
+        | Sig_class_type () -> assert false)
       sg pl;
     Some (Structure_comps c)
   | Mty_functor (param, ty_arg, ty_res) ->
@@ -1749,7 +1706,6 @@ and store_extension ~check id ext env =
      && (not loc.Location.loc_ghost)
      && Warnings.is_active (Warnings.Unused_extension ("", false, false, false))
    then
-     let is_exception = Path.same ext.ext_type_path Predef.path_exn in
      let ty = Path.last ext.ext_type_path in
      let n = Ident.name id in
      let k = (ty, loc, n) in
@@ -1760,7 +1716,7 @@ and store_extension ~check id ext env =
            if (not (is_in_signature env)) && not used.cu_positive then
              Location.prerr_warning loc
                (Warnings.Unused_extension
-                  (n, is_exception, used.cu_pattern, used.cu_privatize)))));
+                  (n, ext.ext_is_exception, used.cu_pattern, used.cu_privatize)))));
   {
     env with
     constrs =
@@ -1790,13 +1746,6 @@ and store_modtype id info env =
     env with
     modtypes = IdTbl.add id info env.modtypes;
     summary = Env_modtype (env.summary, id, info);
-  }
-
-and store_cltype id desc env =
-  {
-    env with
-    cltypes = IdTbl.add id desc env.cltypes;
-    summary = Env_cltype (env.summary, id, desc);
   }
 
 (* Compute the components of a functor application in a path. *)
@@ -1842,8 +1791,6 @@ and add_module_declaration ?(arg = false) ~check id md env =
 
 and add_modtype id info env = store_modtype id info env
 
-and add_cltype id ty env = store_cltype id ty env
-
 let add_module ?arg id mty env =
   add_module_declaration ~check:false ?arg id (md mty) env
 
@@ -1877,8 +1824,6 @@ and enter_module_declaration ?arg id md env =
 
 and enter_modtype = enter store_modtype
 
-and enter_cltype = enter store_cltype
-
 let enter_module ?arg s mty env =
   let id = Ident.create s in
   (id, enter_module_declaration ?arg id (md mty) env)
@@ -1893,7 +1838,7 @@ let add_item comp env =
   | Sig_module (id, md, _) -> add_module_declaration ~check:false id md env
   | Sig_modtype (id, decl) -> add_modtype id decl env
   | Sig_class () -> env
-  | Sig_class_type (id, decl, _) -> add_cltype id decl env
+  | Sig_class_type () -> env
 
 let rec add_signature sg env =
   match sg with
@@ -1917,8 +1862,6 @@ let add_components slot root env0 comps =
   let modtypes =
     add (fun x -> `Module_type x) comps.comp_modtypes env0.modtypes
   in
-  let classes = add (fun x -> `Class x) comps.comp_classes env0.classes in
-  let cltypes = add (fun x -> `Class_type x) comps.comp_cltypes env0.cltypes in
   let components =
     add (fun x -> `Component x) comps.comp_components env0.components
   in
@@ -1933,8 +1876,6 @@ let add_components slot root env0 comps =
     values;
     types;
     modtypes;
-    classes;
-    cltypes;
     components;
     modules;
   }
@@ -2132,12 +2073,6 @@ and fold_types f = find_all (fun env -> env.types) (fun sc -> sc.comp_types) f
 
 and fold_modtypes f =
   find_all (fun env -> env.modtypes) (fun sc -> sc.comp_modtypes) f
-
-and fold_classs f =
-  find_all (fun env -> env.classes) (fun sc -> sc.comp_classes) f
-
-and fold_cltypes f =
-  find_all (fun env -> env.cltypes) (fun sc -> sc.comp_cltypes) f
 
 (* Make the initial environment *)
 let initial_safe_string =

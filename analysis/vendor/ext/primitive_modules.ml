@@ -22,57 +22,36 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA. *)
 
-let exceptions = "Caml_exceptions"
+let bool = "Primitive_bool"
 
-let io = "Caml_io"
+let int = "Primitive_int"
 
-let sys = "Caml_sys"
+let float = "Primitive_float"
 
-let lexer = "Caml_lexer"
+let bigint = "Primitive_bigint"
 
-let parser = "Caml_parser"
+let string = "Primitive_string"
 
-let obj_runtime = "Caml_obj"
+let array = "Primitive_array"
 
-let array = "Caml_array"
+let dict = "Primitive_dict"
 
-let format = "Caml_format"
+let object_ = "Primitive_object"
 
-let string = "Caml_string"
+let promise = "Primitive_promise"
 
-let bytes = "Caml_bytes"
-let bytes_ = "Bytes"
+let module_ = "Primitive_module"
 
-let float = "Caml_float"
+let lazy_ = "Primitive_lazy"
 
-let hash_primitive = "Caml_hash_primitive"
+let option = "Primitive_option"
 
-let hash = "Caml_hash"
+let hash = "Primitive_hash"
 
-let curry = "Curry"
+let exceptions = "Primitive_exceptions"
 
-let caml_primitive = "Caml"
+let curry = "Primitive_curry"
 
-let int64 = "Caml_int64"
+let util = "Primitive_util"
 
-let md5 = "Caml_md5"
-
-let int32 = "Caml_int32"
-
-let bigint = "Caml_bigint"
-
-let option = "Caml_option"
-
-let module_ = "Caml_module"
-
-let external_polyfill = "Caml_external_polyfill"
-
-let caml_js_exceptions = "Caml_js_exceptions"
-
-let caml_splice_call = "Caml_splice_call"
-
-let deriving = "Runtime_deriving"
-
-let promise = "Runtime_promise"
-
-let astExtensions = "Runtime_ast_extensions"
+let pervasives = "Pervasives"

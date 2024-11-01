@@ -20,22 +20,17 @@ open Parsetree
 
 type boxed_integer = Pbigint | Pint32 | Pint64
 
-type native_repr = Same_as_ocaml_repr
-
 type description = {
   prim_name: string; (* Name of primitive  or C function *)
   prim_arity: int; (* Number of arguments *)
   prim_alloc: bool; (* Does it allocates or raise? *)
   prim_native_name: string; (* Name of C function for the nat. code gen. *)
-  prim_native_repr_args: native_repr list;
-  prim_native_repr_res: native_repr;
+  prim_from_constructor: bool;
+      (* Is it from a type constructor instead of a concrete function type? *)
 }
 
 let coerce : (description -> description -> bool) ref =
   ref (fun (p1 : description) (p2 : description) -> p1 = p2)
-
-let rec make_native_repr_args arity x =
-  if arity = 0 then [] else x :: make_native_repr_args (arity - 1) x
 
 let simple ~name ~arity ~alloc =
   {
@@ -43,22 +38,19 @@ let simple ~name ~arity ~alloc =
     prim_arity = arity;
     prim_alloc = alloc;
     prim_native_name = "";
-    prim_native_repr_args = make_native_repr_args arity Same_as_ocaml_repr;
-    prim_native_repr_res = Same_as_ocaml_repr;
+    prim_from_constructor = false;
   }
 
-let make ~name ~alloc ~native_name ~native_repr_args ~native_repr_res =
+let make ~name ~alloc ~native_name ~arity =
   {
     prim_name = name;
-    prim_arity = List.length native_repr_args;
+    prim_arity = arity;
     prim_alloc = alloc;
     prim_native_name = native_name;
-    prim_native_repr_args = native_repr_args;
-    prim_native_repr_res = native_repr_res;
+    prim_from_constructor = false;
   }
 
-let parse_declaration valdecl ~native_repr_args ~native_repr_res =
-  let arity = List.length native_repr_args in
+let parse_declaration valdecl ~arity ~from_constructor =
   let name, native_name =
     match valdecl.pval_prim with
     | name :: name2 :: _ -> (name, name2)
@@ -70,8 +62,7 @@ let parse_declaration valdecl ~native_repr_args ~native_repr_res =
     prim_arity = arity;
     prim_alloc = true;
     prim_native_name = native_name;
-    prim_native_repr_args = native_repr_args;
-    prim_native_repr_res = native_repr_res;
+    prim_from_constructor = from_constructor;
   }
 
 open Outcometree

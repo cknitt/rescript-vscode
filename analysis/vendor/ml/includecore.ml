@@ -333,10 +333,16 @@ let type_declarations ?(equality = false) ~loc env name decl1 id decl2 =
     if err <> [] then err
     else
       let err =
+        let untagged1 =
+          Ast_untagged_variants.process_untagged decl1.type_attributes
+        in
+        let untagged2 =
+          Ast_untagged_variants.process_untagged decl2.type_attributes
+        in
         match
           ( decl2.type_kind,
-            decl1.type_unboxed.unboxed,
-            decl2.type_unboxed.unboxed )
+            decl1.type_unboxed.unboxed || untagged1,
+            decl2.type_unboxed.unboxed || untagged2 )
         with
         | Type_abstract, _, _ -> []
         | _, true, false -> [Unboxed_representation false]

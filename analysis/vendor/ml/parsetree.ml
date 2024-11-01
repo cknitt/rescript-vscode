@@ -95,11 +95,7 @@ and core_type_desc =
     (* < l1:T1; ...; ln:Tn >     (flag = Closed)
        < l1:T1; ...; ln:Tn; .. > (flag = Open)
     *)
-  | Ptyp_class of Longident.t loc * core_type list
-    (* #tconstr
-       T #tconstr
-       (T1, ..., Tn) #tconstr
-    *)
+  | Ptyp_class of unit (* dummy AST node *)
   | Ptyp_alias of core_type * string (* T as 'a *)
   | Ptyp_variant of row_field list * closed_flag * label list option
     (* [ `A|`B ]         (flag = Closed; labels = None)
@@ -214,7 +210,7 @@ and pattern_desc =
 and expression = {
   pexp_desc: expression_desc;
   pexp_loc: Location.t;
-  mutable pexp_attributes: attributes; (* ... [@id1] [@id2] *)
+  pexp_attributes: attributes; (* ... [@id1] [@id2] *)
 }
 
 and expression_desc =
@@ -282,10 +278,9 @@ and expression_desc =
        for i = E1 downto E2 do E3 done  (flag = Downto)
     *)
   | Pexp_constraint of expression * core_type (* (E : T) *)
-  | Pexp_coerce of expression * core_type option * core_type
+  | Pexp_coerce of expression * unit * core_type
     (* (E :> T)        (None, T)
-       (E : T0 :> T)   (Some T0, T)
-    *)
+         *)
   | Pexp_send of expression * label loc (*  E # m *)
   | Pexp_new of Longident.t loc (* new M.c *)
   | Pexp_setinstvar of label loc * expression (* x <- 2 *)
@@ -305,7 +300,7 @@ and expression_desc =
 
        Can only be used as the expression under Cfk_concrete
        for methods (not values). *)
-  | Pexp_object of class_structure (* object ... end *)
+  | Pexp_object of unit (* dummy AST node *)
   | Pexp_newtype of string loc * expression (* fun (type t) -> E *)
   | Pexp_pack of module_expr
     (* (module ME)
@@ -434,145 +429,6 @@ and extension_constructor_kind =
          | C = D
        *)
 
-(* Type expressions for the class language *)
-
-(** {1 Class language} *)
-
-and class_type = {
-  pcty_desc: class_type_desc;
-  pcty_loc: Location.t;
-  pcty_attributes: attributes; (* ... [@id1] [@id2] *)
-}
-
-and class_type_desc =
-  | Pcty_constr of Longident.t loc * core_type list
-    (* c
-       ['a1, ..., 'an] c *)
-  | Pcty_signature of class_signature (* object ... end *)
-  | Pcty_arrow of arg_label * core_type * class_type
-    (* T -> CT       Simple
-       ~l:T -> CT    Labelled l
-       ?l:T -> CT    Optional l
-    *)
-  | Pcty_extension of extension (* [%id] *)
-  | Pcty_open of override_flag * Longident.t loc * class_type
-(* let open M in CT *)
-
-and class_signature = {
-  pcsig_self: core_type;
-  pcsig_fields: class_type_field list;
-}
-(* object('selfpat) ... end
-   object ... end             (self = Ptyp_any)
-*)
-
-and class_type_field = {
-  pctf_desc: class_type_field_desc;
-  pctf_loc: Location.t;
-  pctf_attributes: attributes; (* ... [@@id1] [@@id2] *)
-}
-
-and class_type_field_desc =
-  | Pctf_inherit of class_type (* inherit CT *)
-  | Pctf_val of (label loc * mutable_flag * virtual_flag * core_type)
-    (* val x: T *)
-  | Pctf_method of (label loc * private_flag * virtual_flag * core_type)
-    (* method x: T
-
-       Note: T can be a Ptyp_poly.
-    *)
-  | Pctf_constraint of (core_type * core_type) (* constraint T1 = T2 *)
-  | Pctf_attribute of attribute (* [@@@id] *)
-  | Pctf_extension of extension
-(* [%%id] *)
-
-and 'a class_infos = {
-  pci_virt: virtual_flag;
-  pci_params: (core_type * variance) list;
-  pci_name: string loc;
-  pci_expr: 'a;
-  pci_loc: Location.t;
-  pci_attributes: attributes; (* ... [@@id1] [@@id2] *)
-}
-(* class c = ...
-   class ['a1,...,'an] c = ...
-   class virtual c = ...
-
-   Also used for "class type" declaration.
-*)
-
-and class_type_declaration = class_type class_infos
-
-(* Value expressions for the class language *)
-and class_expr = {
-  pcl_desc: class_expr_desc;
-  pcl_loc: Location.t;
-  pcl_attributes: attributes; (* ... [@id1] [@id2] *)
-}
-
-and class_expr_desc =
-  | Pcl_constr of Longident.t loc * core_type list
-    (* c
-       ['a1, ..., 'an] c *)
-  | Pcl_structure of class_structure (* object ... end *)
-  | Pcl_fun of arg_label * expression option * pattern * class_expr
-    (* fun P -> CE                          (Simple, None)
-       fun ~l:P -> CE                       (Labelled l, None)
-       fun ?l:P -> CE                       (Optional l, None)
-       fun ?l:(P = E0) -> CE                (Optional l, Some E0)
-    *)
-  | Pcl_apply of class_expr * (arg_label * expression) list
-    (* CE ~l1:E1 ... ~ln:En
-       li can be empty (non labeled argument) or start with '?'
-       (optional argument).
-
-       Invariant: n > 0
-    *)
-  | Pcl_let of rec_flag * value_binding list * class_expr
-    (* let P1 = E1 and ... and Pn = EN in CE      (flag = Nonrecursive)
-       let rec P1 = E1 and ... and Pn = EN in CE  (flag = Recursive)
-    *)
-  | Pcl_constraint of class_expr * class_type (* (CE : CT) *)
-  | Pcl_extension of extension
-  (* [%id] *)
-  | Pcl_open of override_flag * Longident.t loc * class_expr
-(* let open M in CE *)
-
-and class_structure = {pcstr_self: pattern; pcstr_fields: class_field list}
-(* object(selfpat) ... end
-   object ... end           (self = Ppat_any)
-*)
-
-and class_field = {
-  pcf_desc: class_field_desc;
-  pcf_loc: Location.t;
-  pcf_attributes: attributes; (* ... [@@id1] [@@id2] *)
-}
-
-and class_field_desc =
-  | Pcf_inherit of unit
-    (* inherit CE
-       inherit CE as x
-       inherit! CE
-       inherit! CE as x
-    *)
-  | Pcf_val of (label loc * mutable_flag * class_field_kind)
-    (* val x = E
-       val virtual x: T
-    *)
-  | Pcf_method of (label loc * private_flag * class_field_kind)
-    (* method x = E            (E can be a Pexp_poly)
-       method virtual x: T     (T can be a Ptyp_poly)
-    *)
-  | Pcf_constraint of (core_type * core_type) (* constraint T1 = T2 *)
-  | Pcf_initializer of expression (* initializer E *)
-  | Pcf_attribute of attribute (* [@@@id] *)
-  | Pcf_extension of extension
-(* [%%id] *)
-
-and class_field_kind =
-  | Cfk_virtual of core_type
-  | Cfk_concrete of override_flag * expression
 (* Type expressions for the module language *)
 
 (** {1 Module language} *)
@@ -616,9 +472,8 @@ and signature_item_desc =
        module type S *)
   | Psig_open of open_description (* open X *)
   | Psig_include of include_description (* include MT *)
-  | Psig_class of unit (* class c1 : ... and ... and cn : ... *)
-  | Psig_class_type of class_type_declaration list
-    (* class type ct1 = ... and ... and ctn = ... *)
+  | Psig_class of unit (* Dummy AST node *)
+  | Psig_class_type of unit (* Dummy AST node *)
   | Psig_attribute of attribute (* [@@@id] *)
   | Psig_extension of extension * attributes
 (* [%%id] *)
@@ -720,8 +575,7 @@ and structure_item_desc =
   | Pstr_modtype of module_type_declaration (* module type S = MT *)
   | Pstr_open of open_description (* open X *)
   | Pstr_class of unit (* Dummy AST node *)
-  | Pstr_class_type of class_type_declaration list
-    (* class type ct1 = ... and ... and ctn = ... *)
+  | Pstr_class_type of unit (* Dummy AST node *)
   | Pstr_include of include_declaration (* include ME *)
   | Pstr_attribute of attribute (* [@@@id] *)
   | Pstr_extension of extension * attributes

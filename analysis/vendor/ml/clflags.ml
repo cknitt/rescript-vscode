@@ -50,7 +50,6 @@ let reset_dump_state () =
   dump_typedtree := false;
   dump_rawlambda := false
 
-let keep_docs = ref false (* -keep-docs *)
 let keep_locs = ref true (* -keep-locs *)
 
 let parse_color_setting = function

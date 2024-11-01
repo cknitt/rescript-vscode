@@ -22,12 +22,6 @@ open Typedtree
 type mapper = {
   case: mapper -> case -> case;
   cases: mapper -> case list -> case list;
-  class_description: mapper -> class_description -> class_description;
-  class_signature: mapper -> class_signature -> class_signature;
-  class_type: mapper -> class_type -> class_type;
-  class_type_declaration:
-    mapper -> class_type_declaration -> class_type_declaration;
-  class_type_field: mapper -> class_type_field -> class_type_field;
   env: mapper -> Env.t -> Env.t;
   expr: mapper -> expression -> expression;
   extension_constructor:
@@ -76,13 +70,6 @@ let structure sub {str_items; str_type; str_final_env} =
     str_type;
   }
 
-let class_infos sub f x =
-  {
-    x with
-    ci_params = List.map (tuple2 (sub.typ sub) id) x.ci_params;
-    ci_expr = f x.ci_expr;
-  }
-
 let module_type_declaration sub x =
   let mtd_type = opt (sub.module_type sub) x.mtd_type in
   {x with mtd_type}
@@ -92,8 +79,6 @@ let module_declaration sub x =
   {x with md_type}
 
 let include_infos f x = {x with incl_mod = f x.incl_mod}
-
-let class_type_declaration sub x = class_infos sub (sub.class_type sub) x
 
 let structure_item sub {str_desc; str_loc; str_env} =
   let str_env = sub.env sub str_env in
@@ -114,9 +99,7 @@ let structure_item sub {str_desc; str_loc; str_env} =
       Tstr_recmodule (List.map (sub.module_binding sub) list)
     | Tstr_modtype x -> Tstr_modtype (sub.module_type_declaration sub x)
     | Tstr_class () -> Tstr_class ()
-    | Tstr_class_type list ->
-      Tstr_class_type
-        (List.map (tuple3 id id (sub.class_type_declaration sub)) list)
+    | Tstr_class_type () -> Tstr_class_type ()
     | Tstr_include incl ->
       Tstr_include (include_infos (sub.module_expr sub) incl)
     | (Tstr_open _ | Tstr_attribute _) as d -> d
@@ -201,8 +184,7 @@ let pat sub x =
 let expr sub x =
   let extra = function
     | Texp_constraint cty -> Texp_constraint (sub.typ sub cty)
-    | Texp_coerce (cty1, cty2) ->
-      Texp_coerce (opt (sub.typ sub) cty1, sub.typ sub cty2)
+    | Texp_coerce ((), cty2) -> Texp_coerce ((), sub.typ sub cty2)
     | Texp_open (ovf, path, loc, env) ->
       Texp_open (ovf, path, loc, sub.env sub env)
     | Texp_newtype _ as d -> d
@@ -300,13 +282,11 @@ let signature_item sub x =
     | Tsig_modtype x -> Tsig_modtype (sub.module_type_declaration sub x)
     | Tsig_include incl ->
       Tsig_include (include_infos (sub.module_type sub) incl)
-    | Tsig_class_type list ->
-      Tsig_class_type (List.map (sub.class_type_declaration sub) list)
-    | (Tsig_class _ | Tsig_open _ | Tsig_attribute _) as d -> d
+    | (Tsig_class_type _ | Tsig_class _ | Tsig_open _ | Tsig_attribute _) as d
+      ->
+      d
   in
   {x with sig_desc; sig_env}
-
-let class_description sub x = class_infos sub (sub.class_type sub) x
 
 let module_type sub x =
   let mty_env = sub.env sub x.mty_env in
@@ -378,38 +358,6 @@ let module_binding sub x =
   let mb_expr = sub.module_expr sub x.mb_expr in
   {x with mb_expr}
 
-let class_type sub x =
-  let cltyp_env = sub.env sub x.cltyp_env in
-  let cltyp_desc =
-    match x.cltyp_desc with
-    | Tcty_signature csg -> Tcty_signature (sub.class_signature sub csg)
-    | Tcty_constr (path, lid, list) ->
-      Tcty_constr (path, lid, List.map (sub.typ sub) list)
-    | Tcty_arrow (label, ct, cl) ->
-      Tcty_arrow (label, sub.typ sub ct, sub.class_type sub cl)
-    | Tcty_open (ovf, p, lid, env, e) ->
-      Tcty_open (ovf, p, lid, sub.env sub env, sub.class_type sub e)
-  in
-  {x with cltyp_desc; cltyp_env}
-
-let class_signature sub x =
-  let csig_self = sub.typ sub x.csig_self in
-  let csig_fields = List.map (sub.class_type_field sub) x.csig_fields in
-  {x with csig_self; csig_fields}
-
-let class_type_field sub x =
-  let ctf_desc =
-    match x.ctf_desc with
-    | Tctf_inherit ct -> Tctf_inherit (sub.class_type sub ct)
-    | Tctf_val (s, mut, virt, ct) -> Tctf_val (s, mut, virt, sub.typ sub ct)
-    | Tctf_method (s, priv, virt, ct) ->
-      Tctf_method (s, priv, virt, sub.typ sub ct)
-    | Tctf_constraint (ct1, ct2) ->
-      Tctf_constraint (sub.typ sub ct1, sub.typ sub ct2)
-    | Tctf_attribute _ as d -> d
-  in
-  {x with ctf_desc}
-
 let typ sub x =
   let ctyp_env = sub.env sub x.ctyp_env in
   let ctyp_desc =
@@ -422,8 +370,7 @@ let typ sub x =
       Ttyp_constr (path, lid, List.map (sub.typ sub) list)
     | Ttyp_object (list, closed) ->
       Ttyp_object (List.map (sub.object_field sub) list, closed)
-    | Ttyp_class (path, lid, list) ->
-      Ttyp_class (path, lid, List.map (sub.typ sub) list)
+    | Ttyp_class () -> Ttyp_class ()
     | Ttyp_alias (ct, s) -> Ttyp_alias (sub.typ sub ct, s)
     | Ttyp_variant (list, closed, labels) ->
       Ttyp_variant (List.map (sub.row_field sub) list, closed, labels)
@@ -464,11 +411,6 @@ let default =
   {
     case;
     cases;
-    class_description;
-    class_signature;
-    class_type;
-    class_type_declaration;
-    class_type_field;
     env;
     expr;
     extension_constructor;

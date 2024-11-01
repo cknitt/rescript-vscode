@@ -155,11 +155,11 @@ let rec print_out_type_doc (out_type : Outcometree.out_type) =
       ( Oide_dot (Oide_dot (Oide_ident "Js", "Fn"), _),
         [(Otyp_arrow _ as arrow_type)] ) ->
     (* Compatibility with compiler up to v10.x *)
-    print_out_arrow_type ~uncurried:true arrow_type
+    print_out_arrow_type arrow_type
   | Otyp_constr (Oide_ident "function$", [(Otyp_arrow _ as arrow_type); _arity])
     ->
     (* function$<(int, int) => int, [#2]> -> (. int, int) => int *)
-    print_out_arrow_type ~uncurried:true arrow_type
+    print_out_arrow_type arrow_type
   | Otyp_constr (Oide_ident "function$", [Otyp_var _; _arity]) ->
     (* function$<'a, arity> -> _ => _ *)
     print_out_type_doc (Otyp_stuff "_ => _")
@@ -234,7 +234,7 @@ let rec print_out_type_doc (out_type : Outcometree.out_type) =
            Doc.space;
            print_out_type_doc out_type;
          ])
-  | Otyp_arrow _ as typ -> print_out_arrow_type ~uncurried:false typ
+  | Otyp_arrow _ as typ -> print_out_arrow_type typ
   | Otyp_module (mod_name, string_list, out_types) ->
     let package_type_doc =
       match (string_list, out_types) with
@@ -266,8 +266,7 @@ let rec print_out_type_doc (out_type : Outcometree.out_type) =
         Doc.rparen;
       ]
 
-and print_out_arrow_type ~uncurried typ =
-  let uncurried = Res_uncurried.get_dotted ~uncurried !Config.uncurried in
+and print_out_arrow_type typ =
   let typ_args, typ = collect_arrow_args typ [] in
   let args =
     Doc.join
@@ -297,7 +296,6 @@ and print_out_arrow_type ~uncurried typ =
   let args_doc =
     let needs_parens =
       match typ_args with
-      | _ when uncurried -> true
       | [
        ( _,
          ( Otyp_tuple _ | Otyp_arrow _
@@ -312,7 +310,7 @@ and print_out_arrow_type ~uncurried typ =
       Doc.group
         (Doc.concat
            [
-             (if uncurried then Doc.text "(. " else Doc.lparen);
+             Doc.lparen;
              Doc.indent (Doc.concat [Doc.soft_line; args]);
              Doc.trailing_comma;
              Doc.soft_line;
@@ -429,7 +427,12 @@ and print_out_constructors_doc constructors =
                  constructors);
           ]))
 
-and print_out_constructor_doc (name, args, gadt) =
+and print_out_constructor_doc (name, args, gadt, repr) =
+  let repr_doc =
+    match repr with
+    | None -> Doc.nil
+    | Some s -> Doc.text (s ^ " ")
+  in
   let gadt_doc =
     match gadt with
     | Some out_type -> Doc.concat [Doc.text ": "; print_out_type_doc out_type]
@@ -469,7 +472,7 @@ and print_out_constructor_doc (name, args, gadt) =
              Doc.rparen;
            ])
   in
-  Doc.group (Doc.concat [Doc.text name; args_doc; gadt_doc])
+  Doc.group (Doc.concat [repr_doc; Doc.text name; args_doc; gadt_doc])
 
 and print_record_decl_row_doc (name, mut, opt, arg) =
   Doc.group
@@ -678,7 +681,6 @@ let rec print_out_sig_item_doc ?(print_name_as_is = false)
            Doc.group
              (Doc.concat
                 [
-                  attrs;
                   kw;
                   (if print_name_as_is then Doc.text out_type_decl.otype_name
                    else
@@ -758,13 +760,14 @@ and print_out_signature_doc (signature : Outcometree.out_sig_item list) =
         match items with
         | Outcometree.Osig_typext (ext, Oext_next) :: items ->
           gather_extensions
-            ((ext.oext_name, ext.oext_args, ext.oext_ret_type) :: acc)
+            ((ext.oext_name, ext.oext_args, ext.oext_ret_type, ext.oext_repr)
+            :: acc)
             items
         | _ -> (List.rev acc, items)
       in
       let exts, items =
         gather_extensions
-          [(ext.oext_name, ext.oext_args, ext.oext_ret_type)]
+          [(ext.oext_name, ext.oext_args, ext.oext_ret_type, ext.oext_repr)]
           items
       in
       let te =
@@ -822,7 +825,10 @@ and print_out_extension_constructor_doc
          (if out_ext.oext_private = Asttypes.Private then Doc.text "private "
           else Doc.nil);
          print_out_constructor_doc
-           (out_ext.oext_name, out_ext.oext_args, out_ext.oext_ret_type);
+           ( out_ext.oext_name,
+             out_ext.oext_args,
+             out_ext.oext_ret_type,
+             out_ext.oext_repr );
        ])
 
 and print_out_type_extension_doc
@@ -1035,13 +1041,14 @@ let print_out_phrase_signature signature =
         match items with
         | (Outcometree.Osig_typext (ext, Oext_next), None) :: items ->
           gather_extensions
-            ((ext.oext_name, ext.oext_args, ext.oext_ret_type) :: acc)
+            ((ext.oext_name, ext.oext_args, ext.oext_ret_type, ext.oext_repr)
+            :: acc)
             items
         | _ -> (List.rev acc, items)
       in
       let exts, signature =
         gather_extensions
-          [(ext.oext_name, ext.oext_args, ext.oext_ret_type)]
+          [(ext.oext_name, ext.oext_args, ext.oext_ret_type, ext.oext_repr)]
           signature
       in
       let te =

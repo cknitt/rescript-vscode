@@ -67,11 +67,6 @@ let fmt_mutable_flag f x =
   | Immutable -> fprintf f "Immutable"
   | Mutable -> fprintf f "Mutable"
 
-let fmt_virtual_flag f x =
-  match x with
-  | Virtual -> fprintf f "Virtual"
-  | Concrete -> fprintf f "Concrete"
-
 let fmt_override_flag f x =
   match x with
   | Override -> fprintf f "Override"
@@ -184,9 +179,7 @@ let rec core_type i ppf x =
           line i ppf "OTinherit\n";
           core_type (i + 1) ppf ct)
       l
-  | Ttyp_class (li, _, l) ->
-    line i ppf "Ttyp_class %a\n" fmt_path li;
-    list i core_type ppf l
+  | Ttyp_class () -> ()
   | Ttyp_alias (ct, s) ->
     line i ppf "Ttyp_alias \"%s\"\n" s;
     core_type i ppf ct
@@ -262,10 +255,9 @@ and expression_extra i ppf x attrs =
     line i ppf "Texp_constraint\n";
     attributes i ppf attrs;
     core_type i ppf ct
-  | Texp_coerce (cto1, cto2) ->
+  | Texp_coerce ((), cto2) ->
     line i ppf "Texp_coerce\n";
     attributes i ppf attrs;
-    option i core_type ppf cto1;
     core_type i ppf cto2
   | Texp_open (ovf, m, _, _) ->
     line i ppf "Texp_open %a \"%a\"\n" fmt_override_flag ovf fmt_path m;
@@ -453,65 +445,6 @@ and extension_constructor_kind i ppf x =
     line i ppf "Text_rebind\n";
     line (i + 1) ppf "%a\n" fmt_path p
 
-and class_type i ppf x =
-  line i ppf "class_type %a\n" fmt_location x.cltyp_loc;
-  attributes i ppf x.cltyp_attributes;
-  let i = i + 1 in
-  match x.cltyp_desc with
-  | Tcty_constr (li, _, l) ->
-    line i ppf "Tcty_constr %a\n" fmt_path li;
-    list i core_type ppf l
-  | Tcty_signature cs ->
-    line i ppf "Tcty_signature\n";
-    class_signature i ppf cs
-  | Tcty_arrow (l, co, cl) ->
-    line i ppf "Tcty_arrow\n";
-    arg_label i ppf l;
-    core_type i ppf co;
-    class_type i ppf cl
-  | Tcty_open (ovf, m, _, _, e) ->
-    line i ppf "Tcty_open %a \"%a\"\n" fmt_override_flag ovf fmt_path m;
-    class_type i ppf e
-
-and class_signature i ppf {csig_self = ct; csig_fields = l} =
-  line i ppf "class_signature\n";
-  core_type (i + 1) ppf ct;
-  list (i + 1) class_type_field ppf l
-
-and class_type_field i ppf x =
-  line i ppf "class_type_field %a\n" fmt_location x.ctf_loc;
-  let i = i + 1 in
-  attributes i ppf x.ctf_attributes;
-  match x.ctf_desc with
-  | Tctf_inherit ct ->
-    line i ppf "Tctf_inherit\n";
-    class_type i ppf ct
-  | Tctf_val (s, mf, vf, ct) ->
-    line i ppf "Tctf_val \"%s\" %a %a\n" s fmt_mutable_flag mf fmt_virtual_flag
-      vf;
-    core_type (i + 1) ppf ct
-  | Tctf_method (s, pf, vf, ct) ->
-    line i ppf "Tctf_method \"%s\" %a %a\n" s fmt_private_flag pf
-      fmt_virtual_flag vf;
-    core_type (i + 1) ppf ct
-  | Tctf_constraint (ct1, ct2) ->
-    line i ppf "Tctf_constraint\n";
-    core_type (i + 1) ppf ct1;
-    core_type (i + 1) ppf ct2
-  | Tctf_attribute (s, arg) ->
-    line i ppf "Tctf_attribute \"%s\"\n" s.txt;
-    Printast.payload i ppf arg
-
-and class_type_declaration i ppf x =
-  line i ppf "class_type_declaration %a\n" fmt_location x.ci_loc;
-  let i = i + 1 in
-  line i ppf "pci_virt = %a\n" fmt_virtual_flag x.ci_virt;
-  line i ppf "pci_params =\n";
-  list (i + 1) type_parameter ppf x.ci_params;
-  line i ppf "pci_name = \"%s\"\n" x.ci_id_name.txt;
-  line i ppf "pci_expr =\n";
-  class_type (i + 1) ppf x.ci_expr
-
 and module_type i ppf x =
   line i ppf "module_type %a\n" fmt_location x.mty_loc;
   attributes i ppf x.mty_attributes;
@@ -572,9 +505,7 @@ and signature_item i ppf x =
     attributes i ppf incl.incl_attributes;
     module_type i ppf incl.incl_mod
   | Tsig_class () -> ()
-  | Tsig_class_type l ->
-    line i ppf "Tsig_class_type\n";
-    list i class_type_declaration ppf l
+  | Tsig_class_type () -> ()
   | Tsig_attribute (s, arg) ->
     line i ppf "Tsig_attribute \"%s\"\n" s.txt;
     Printast.payload i ppf arg
@@ -670,9 +601,7 @@ and structure_item i ppf x =
       od.open_path;
     attributes i ppf od.open_attributes
   | Tstr_class () -> ()
-  | Tstr_class_type l ->
-    line i ppf "Tstr_class_type\n";
-    list i class_type_declaration ppf (List.map (fun (_, _, cl) -> cl) l)
+  | Tstr_class_type () -> ()
   | Tstr_include incl ->
     line i ppf "Tstr_include";
     attributes i ppf incl.incl_attributes;

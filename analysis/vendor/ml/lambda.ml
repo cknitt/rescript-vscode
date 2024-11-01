@@ -13,16 +13,6 @@
 (*                                                                        *)
 (**************************************************************************)
 
-type compile_time_constant =
-  | Big_endian
-  | Word_size
-  | Int_size
-  | Max_wosize
-  | Ostype_unix
-  | Ostype_win32
-  | Ostype_cygwin
-  | Backend_type
-
 type loc_kind = Loc_FILE | Loc_LINE | Loc_MODULE | Loc_LOC | Loc_POS
 
 type record_repr = Record_regular | Record_optional
@@ -187,8 +177,12 @@ type is_safe = Safe | Unsafe
 
 type primitive =
   | Pidentity
-  | Pbytes_to_string
   | Pignore
+  | Pdebugger
+  | Ptypeof
+  | Pnull
+  | Pundefined
+  | Pfn_arity
   | Prevapply
   | Pdirapply
   | Ploc of loc_kind (* Globals *)
@@ -204,10 +198,21 @@ type primitive =
   | Pccall of Primitive.description
   (* Exceptions *)
   | Praise of raise_kind
+  (* object operations *)
+  | Pobjcomp of comparison
+  | Pobjorder
+  | Pobjmin
+  | Pobjmax
+  | Pobjtag
+  | Pobjsize
   (* Boolean operations *)
   | Psequand
   | Psequor
   | Pnot
+  | Pboolcomp of comparison
+  | Pboolorder
+  | Pboolmin
+  | Pboolmax
   (* Integer operations *)
   | Pnegint
   | Paddint
@@ -222,6 +227,9 @@ type primitive =
   | Plsrint
   | Pasrint
   | Pintcomp of comparison
+  | Pintorder
+  | Pintmin
+  | Pintmax
   | Poffsetint of int
   | Poffsetref of int
   (* Float operations *)
@@ -229,11 +237,15 @@ type primitive =
   | Pfloatofint
   | Pnegfloat
   | Pabsfloat
+  | Pmodfloat
   | Paddfloat
   | Psubfloat
   | Pmulfloat
   | Pdivfloat
   | Pfloatcomp of comparison
+  | Pfloatorder
+  | Pfloatmin
+  | Pfloatmax
   (* BigInt operations *)
   | Pnegbigint
   | Paddbigint
@@ -248,15 +260,18 @@ type primitive =
   | Plslbigint
   | Pasrbigint
   | Pbigintcomp of comparison
+  | Pbigintorder
+  | Pbigintmin
+  | Pbigintmax
   (* String operations *)
   | Pstringlength
   | Pstringrefu
   | Pstringrefs
-  | Pbyteslength
-  | Pbytesrefu
-  | Pbytessetu
-  | Pbytesrefs
-  | Pbytessets
+  | Pstringcomp of comparison
+  | Pstringorder
+  | Pstringmin
+  | Pstringmax
+  | Pstringadd
   (* Array operations *)
   | Pmakearray of Asttypes.mutable_flag
   | Parraylength
@@ -264,36 +279,51 @@ type primitive =
   | Parraysetu
   | Parrayrefs
   | Parraysets
+  (* List primitives *)
+  | Pmakelist of Asttypes.mutable_flag
+  (* dict primitives *)
+  | Pmakedict
+  (* promise *)
+  | Pawait
+  (* module *)
+  | Pimport
+  | Pinit_mod
+  | Pupdate_mod
+  (* hash *)
+  | Phash
+  | Phash_mixint
+  | Phash_mixstring
+  | Phash_finalmix
   (* Test if the argument is a block or an immediate integer *)
   | Pisint
   (* Test if the (integer) argument is outside an interval *)
   | Pisout
-  | Pbintofint of boxed_integer
-  | Pintofbint of boxed_integer
-  | Pcvtbint of boxed_integer (*source*) * boxed_integer (*destination*)
-  | Pnegbint of boxed_integer
-  | Paddbint of boxed_integer
-  | Psubbint of boxed_integer
-  | Pmulbint of boxed_integer
-  | Pdivbint of {size: boxed_integer; is_safe: is_safe}
-  | Pmodbint of {size: boxed_integer; is_safe: is_safe}
-  | Pandbint of boxed_integer
-  | Porbint of boxed_integer
-  | Pxorbint of boxed_integer
-  | Plslbint of boxed_integer
-  | Plsrbint of boxed_integer
-  | Pasrbint of boxed_integer
-  | Pbintcomp of boxed_integer * comparison
-  | Pctconst of compile_time_constant
-  (* Inhibition of optimisation *)
-  | Popaque
-  | Puncurried_apply
+  (* Test if the argument is null or undefined *)
+  | Pisnullable
+  (* exn *)
   | Pcreate_extension of string
+  | Pextension_slot_eq
+  | Pwrap_exn
+  (* js *)
+  | Pcurry_apply of int
+  | Pjscomp of comparison
+  | Pundefined_to_opt
+  | Pnull_to_opt
+  | Pnullable_to_opt
+  | Pis_not_none
+  | Pval_from_option
+  | Pval_from_option_not_nest
+  | Pis_poly_var_block
+  | Pjs_raw_expr
+  | Pjs_raw_stmt
+  | Pjs_fn_make of int
+  | Pjs_fn_make_unit
+  | Pjs_fn_method
+  | Pjs_unsafe_downgrade
+
 and comparison = Ceq | Cneq | Clt | Cgt | Cle | Cge
 
 and value_kind = Pgenval
-
-and boxed_integer = Primitive.boxed_integer = Pbigint | Pint32 | Pint64
 
 and raise_kind = Raise_regular | Raise_reraise | Raise_notrace
 

@@ -496,13 +496,14 @@ and print_out_signature ppf = function
       match items with
       | Osig_typext (ext, Oext_next) :: items ->
         gather_extensions
-          ((ext.oext_name, ext.oext_args, ext.oext_ret_type) :: acc)
+          ((ext.oext_name, ext.oext_args, ext.oext_ret_type, ext.oext_repr)
+          :: acc)
           items
       | _ -> (List.rev acc, items)
     in
     let exts, items =
       gather_extensions
-        [(ext.oext_name, ext.oext_args, ext.oext_ret_type)]
+        [(ext.oext_name, ext.oext_args, ext.oext_ret_type, ext.oext_repr)]
         items
     in
     let te =
@@ -530,7 +531,7 @@ and print_out_sig_item ppf = function
       print_out_class_params params name !out_class_type clt
   | Osig_typext (ext, Oext_exception) ->
     fprintf ppf "@[<2>exception %a@]" print_out_constr
-      (ext.oext_name, ext.oext_args, ext.oext_ret_type)
+      (ext.oext_name, ext.oext_args, ext.oext_ret_type, ext.oext_repr)
   | Osig_typext (ext, _es) -> print_out_extension_constructor ppf ext
   | Osig_modtype (name, Omty_abstract) ->
     fprintf ppf "@[<2>module type %s@]" name
@@ -625,7 +626,12 @@ and print_out_type_decl kwd ppf td =
   fprintf ppf "@[<2>@[<hv 2>%t%a@]%t%t%t@]" print_name_params print_out_tkind ty
     print_constraints print_immediate print_unboxed
 
-and print_out_constr ppf (name, tyl, ret_type_opt) =
+and print_out_constr ppf (name, tyl, ret_type_opt, repr) =
+  let () =
+    match repr with
+    | None -> ()
+    | Some s -> pp_print_string ppf s
+  in
   let name =
     match name with
     | "::" -> "(::)" (* #7200 *)
@@ -664,7 +670,7 @@ and print_out_extension_constructor ppf ext =
   fprintf ppf "@[<hv 2>type %t +=%s@;<1 2>%a@]" print_extended_type
     (if ext.oext_private = Asttypes.Private then " private" else "")
     print_out_constr
-    (ext.oext_name, ext.oext_args, ext.oext_ret_type)
+    (ext.oext_name, ext.oext_args, ext.oext_ret_type, ext.oext_repr)
 
 and print_out_type_extension ppf te =
   let print_extended_type ppf =
@@ -708,13 +714,14 @@ let rec print_items ppf = function
       match items with
       | (Osig_typext (ext, Oext_next), None) :: items ->
         gather_extensions
-          ((ext.oext_name, ext.oext_args, ext.oext_ret_type) :: acc)
+          ((ext.oext_name, ext.oext_args, ext.oext_ret_type, ext.oext_repr)
+          :: acc)
           items
       | _ -> (List.rev acc, items)
     in
     let exts, items =
       gather_extensions
-        [(ext.oext_name, ext.oext_args, ext.oext_ret_type)]
+        [(ext.oext_name, ext.oext_args, ext.oext_ret_type, ext.oext_repr)]
         items
     in
     let te =

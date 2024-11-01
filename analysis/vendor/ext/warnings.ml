@@ -379,7 +379,14 @@ let message = function
   | All_clauses_guarded ->
     "this pattern-matching is not exhaustive.\n\
      All clauses in this pattern-matching are guarded."
-  | Unused_var v | Unused_var_strict v -> "unused variable " ^ v ^ "."
+  | Unused_var v | Unused_var_strict v ->
+    Format.sprintf
+      "unused variable %s.\n\n\
+       Fix this by:\n\
+       - Deleting the variable if it's not used anymore.\n\
+       - Prepending the variable name with `_` (like `_%s`) to ignore that the \
+       variable is unused.\n\
+       - Using the variable somewhere." v v
   | Wildcard_arg_to_constant_constr ->
     "wildcard pattern given as argument to a constant constructor"
   | Eol_in_string ->
@@ -483,7 +490,7 @@ let message = function
     ^ " : using an empty string as a shorthand to infer the external's name \
        from the value's name is dangerous when refactoring, and therefore \
        deprecated"
-  | Bs_unimplemented_primitive s -> "Unimplemented primitive used:" ^ s
+  | Bs_unimplemented_primitive s -> "Unimplemented primitive used: " ^ s
   | Bs_integer_literal_overflow ->
     "Integer literal exceeds the range of representable integers of type int"
   | Bs_uninterpreted_delimiters s -> "Uninterpreted delimiters " ^ s

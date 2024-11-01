@@ -175,12 +175,17 @@ let build_unguarded_env : Ident.t list -> Env.env =
 let is_ref : Types.value_description -> bool = function
   | {
       Types.val_kind =
-        Types.Val_prim {Primitive.prim_name = "%makemutable"; prim_arity = 1};
+        Types.Val_prim {Primitive.prim_name = "%makeref"; prim_arity = 1};
     } ->
     true
   | _ -> false
 
 type sd = Static | Dynamic
+
+let value_default f ~default a =
+  match a with
+  | None -> default
+  | Some a -> f a
 
 let rec classify_expression : Typedtree.expression -> sd =
  fun exp ->
@@ -241,7 +246,7 @@ let rec expression : Env.env -> Typedtree.expression -> Use.t =
   | Texp_construct (_, desc, exprs) ->
     let access_constructor =
       match desc.cstr_tag with
-      | Cstr_extension (pth, _) -> Use.inspect (path env pth)
+      | Cstr_extension pth -> Use.inspect (path env pth)
       | _ -> Use.empty
     in
     let use =
@@ -300,7 +305,7 @@ let rec expression : Env.env -> Typedtree.expression -> Use.t =
   | Texp_extension_constructor _ -> Use.empty
 
 and option : 'a. (Env.env -> 'a -> Use.t) -> Env.env -> 'a option -> Use.t =
- fun f env -> Misc.Stdlib.Option.value_default (f env) ~default:Use.empty
+ fun f env -> value_default (f env) ~default:Use.empty
 
 and list : 'a. (Env.env -> 'a -> Use.t) -> Env.env -> 'a list -> Use.t =
  fun f env ->

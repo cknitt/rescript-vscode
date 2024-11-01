@@ -65,8 +65,6 @@ val generalizable : int -> type_expr -> bool
 val id_of_pattern : Typedtree.pattern -> Ident.t option
 val name_pattern : string -> Typedtree.case list -> Ident.t
 
-val self_coercion : (Path.t * Location.t list ref) list ref
-
 type error =
   | Polymorphic_label of Longident.t
   | Constructor_arity_mismatch of Longident.t * int * int
@@ -80,8 +78,14 @@ type error =
       * Error_message_utils.type_clash_context option
   | Apply_non_function of type_expr
   | Apply_wrong_label of arg_label * type_expr
-  | Label_multiply_defined of string
-  | Labels_missing of string list * bool
+  | Label_multiply_defined of {
+      label: string;
+      jsx_component_info: Error_message_utils.jsx_prop_error_info option;
+    }
+  | Labels_missing of {
+      labels: string list;
+      jsx_component_info: Error_message_utils.jsx_prop_error_info option;
+    }
   | Label_not_mutable of Longident.t
   | Wrong_name of string * type_expr * string * Path.t * string * string list
   | Name_type_mismatch of
@@ -90,8 +94,6 @@ type error =
   | Private_type of type_expr
   | Private_label of Longident.t * type_expr
   | Not_subtype of (type_expr * type_expr) list * (type_expr * type_expr) list
-  | Coercion_failure of
-      type_expr * type_expr * (type_expr * type_expr) list * bool
   | Too_many_arguments of bool * type_expr
   | Abstract_wrong_label of arg_label * type_expr
   | Scoping_let_module of string * type_expr
@@ -120,6 +122,8 @@ type error =
   | Empty_record_literal
   | Uncurried_arity_mismatch of type_expr * int * int
   | Field_not_optional of string * type_expr
+  | Type_params_not_supported of Longident.t
+  | Field_access_on_dict_type
 exception Error of Location.t * Env.t * error
 exception Error_forward of Location.error
 
@@ -142,7 +146,7 @@ val type_open :
   Path.t * Env.t)
   ref
 
-(* Forward declaration, to be filled in by Typeclass.class_structure *)
+(* Forward declaration, to be filled in by Typemod.type_package *)
 val type_package :
   (Env.t ->
   Parsetree.module_expr ->

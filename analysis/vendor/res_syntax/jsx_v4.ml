@@ -310,7 +310,8 @@ let make_label_decls named_type_list =
     | hd :: tl ->
       if mem_label hd tl then
         let _, label, _, loc, _ = hd in
-        Jsx_common.raise_error ~loc "JSX: found the duplicated prop `%s`" label
+        Jsx_common.raise_error ~loc
+          "The prop `%s` is defined several times in this component." label
       else check_duplicated_label tl
   in
   let () = named_type_list |> List.rev |> check_duplicated_label in
@@ -327,7 +328,7 @@ let make_label_decls named_type_list =
            Type.field ~loc ~attrs {txt = label; loc}
              (Typ.var @@ safe_type_from_value @@ Labelled label))
 
-let make_type_decls props_name loc named_type_list =
+let make_type_decls ~attrs props_name loc named_type_list =
   let label_decl_list = make_label_decls named_type_list in
   (* 'id, 'className, ... *)
   let params =
@@ -335,7 +336,7 @@ let make_type_decls props_name loc named_type_list =
     |> List.map (fun core_type -> (core_type, Invariant))
   in
   [
-    Type.mk ~loc ~params {txt = props_name; loc}
+    Type.mk ~attrs ~loc ~params {txt = props_name; loc}
       ~kind:(Ptype_record label_decl_list);
   ]
 
@@ -346,22 +347,34 @@ let make_type_decls_with_core_type props_name loc core_type typ_vars =
       ~manifest:core_type;
   ]
 
+let live_attr = ({txt = "live"; loc = Location.none}, PStr [])
+let jsx_component_props_attr =
+  ({txt = "res.jsxComponentProps"; loc = Location.none}, PStr [])
+
 (* type props<'x, 'y, ...> = { x: 'x, y?: 'y, ... } *)
-let make_props_record_type ~core_type_of_attr ~typ_vars_of_core_type props_name
-    loc named_type_list =
+let make_props_record_type ~core_type_of_attr ~external_ ~typ_vars_of_core_type
+    props_name loc named_type_list =
+  let attrs =
+    if external_ then [jsx_component_props_attr; live_attr]
+    else [jsx_component_props_attr]
+  in
   Str.type_ Nonrecursive
     (match core_type_of_attr with
-    | None -> make_type_decls props_name loc named_type_list
+    | None -> make_type_decls ~attrs props_name loc named_type_list
     | Some core_type ->
       make_type_decls_with_core_type props_name loc core_type
         typ_vars_of_core_type)
 
 (* type props<'x, 'y, ...> = { x: 'x, y?: 'y, ... } *)
-let make_props_record_type_sig ~core_type_of_attr ~typ_vars_of_core_type
-    props_name loc named_type_list =
+let make_props_record_type_sig ~core_type_of_attr ~external_
+    ~typ_vars_of_core_type props_name loc named_type_list =
+  let attrs =
+    if external_ then [jsx_component_props_attr; live_attr]
+    else [jsx_component_props_attr]
+  in
   Sig.type_ Nonrecursive
     (match core_type_of_attr with
-    | None -> make_type_decls props_name loc named_type_list
+    | None -> make_type_decls ~attrs props_name loc named_type_list
     | Some core_type ->
       make_type_decls_with_core_type props_name loc core_type
         typ_vars_of_core_type)
@@ -950,8 +963,8 @@ let map_binding ~config ~empty_loc ~pstr_loc ~file_name ~rec_flag binding =
     let named_type_list = List.fold_left arg_to_type [] named_arg_list in
     (* type props = { ... } *)
     let props_record_type =
-      make_props_record_type ~core_type_of_attr ~typ_vars_of_core_type "props"
-        pstr_loc named_type_list
+      make_props_record_type ~core_type_of_attr ~external_:false
+        ~typ_vars_of_core_type "props" pstr_loc named_type_list
     in
     let inner_expression =
       Exp.apply
@@ -994,11 +1007,9 @@ let map_binding ~config ~empty_loc ~pstr_loc ~file_name ~rec_flag binding =
          else inner_expression)
     in
     let full_expression =
-      if !Config.uncurried = Uncurried then
-        full_expression
-        |> Ast_uncurried.uncurried_fun ~loc:full_expression.pexp_loc
-             ~arity:(if has_forward_ref then 2 else 1)
-      else full_expression
+      full_expression
+      |> Ast_uncurried.uncurried_fun ~loc:full_expression.pexp_loc
+           ~arity:(if has_forward_ref then 2 else 1)
     in
     let full_expression =
       match full_module_name with
@@ -1211,8 +1222,8 @@ let transform_structure_item ~config item =
       in
       (* type props<'x, 'y> = { x: 'x, y?: 'y, ... } *)
       let props_record_type =
-        make_props_record_type ~core_type_of_attr ~typ_vars_of_core_type "props"
-          pstr_loc named_type_list
+        make_props_record_type ~core_type_of_attr ~external_:true
+          ~typ_vars_of_core_type "props" pstr_loc named_type_list
       in
       (* can't be an arrow because it will defensively uncurry *)
       let new_external_type =
@@ -1317,9 +1328,10 @@ let transform_signature_item ~config item =
             | [] -> []
             | _ -> [Typ.any ()]))
       in
+      let external_ = psig_desc.pval_prim <> [] in
       let props_record_type =
-        make_props_record_type_sig ~core_type_of_attr ~typ_vars_of_core_type
-          "props" psig_loc named_type_list
+        make_props_record_type_sig ~core_type_of_attr ~external_
+          ~typ_vars_of_core_type "props" psig_loc named_type_list
       in
       (* can't be an arrow because it will defensively uncurry *)
       let new_external_type =

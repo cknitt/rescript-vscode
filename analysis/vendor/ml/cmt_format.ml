@@ -174,9 +174,7 @@ open Cmi_format
 
 let save_cmt filename modname binary_annots sourcefile initial_env cmi =
   if !Clflags.binary_annotations then begin
-    (if !Config.bs_only then Misc.output_to_bin_file_directly else 
-    Misc.output_to_file_via_temporary
-       ~mode:[Open_binary] ) filename
+    Misc.output_to_bin_file_directly filename
        (fun temp_file_name oc ->
          let this_crc =
            match cmi with
@@ -188,7 +186,7 @@ let save_cmt filename modname binary_annots sourcefile initial_env cmi =
            cmt_modname = modname;
            cmt_annots = clear_env binary_annots;
            cmt_value_dependencies = !value_deps;
-           cmt_comments = Lexer.comments ();
+           cmt_comments = [];
            cmt_args = Sys.argv;
            cmt_sourcefile = sourcefile;
            cmt_builddir =  Sys.getcwd ();

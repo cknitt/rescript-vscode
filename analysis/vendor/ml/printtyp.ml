@@ -52,11 +52,10 @@ let ident ppf id = pp_print_string ppf (ident_name id)
 (* Print a path *)
 
 let ident_pervasives = Ident.create_persistent "Pervasives"
-let ident_pervasives_u = Ident.create_persistent "PervasivesU"
 let printing_env = ref Env.empty
 let non_shadowed_pervasive = function
   | Pdot (Pident id, s, _pos) as path -> (
-    (Ident.same id ident_pervasives || Ident.same id ident_pervasives_u)
+    Ident.same id ident_pervasives
     &&
     try Path.same path (Env.lookup_type (Lident s) !printing_env)
     with Not_found -> true)
@@ -865,6 +864,7 @@ let rec tree_of_type_decl id decl =
   in
   let name, args = type_defined decl in
   let constraints = tree_of_constraints params in
+  let untagged = ref false in
   let ty, priv =
     match decl.type_kind with
     | Type_abstract -> (
@@ -872,6 +872,7 @@ let rec tree_of_type_decl id decl =
       | None -> (Otyp_abstract, Public)
       | Some ty -> (tree_of_typexp false ty, decl.type_private))
     | Type_variant cstrs ->
+      untagged := Ast_untagged_variants.process_untagged decl.type_attributes;
       ( tree_of_manifest (Otyp_sum (List.map tree_of_constructor cstrs)),
         decl.type_private )
     | Type_record (lbls, _rep) ->
@@ -886,7 +887,7 @@ let rec tree_of_type_decl id decl =
     otype_type = ty;
     otype_private = priv;
     otype_immediate = immediate;
-    otype_unboxed = decl.type_unboxed.unboxed;
+    otype_unboxed = decl.type_unboxed.unboxed || !untagged;
     otype_cstrs = constraints;
   }
 
@@ -896,16 +897,30 @@ and tree_of_constructor_arguments = function
 
 and tree_of_constructor cd =
   let name = Ident.name cd.cd_id in
+  let nullary = Ast_untagged_variants.is_nullary_variant cd.cd_args in
+  let repr =
+    if not nullary then None
+    else
+      match Ast_untagged_variants.process_tag_type cd.cd_attributes with
+      | Some Null -> Some "@as(null)"
+      | Some Undefined -> Some "@as(undefined)"
+      | Some (String s) -> Some (Printf.sprintf "@as(%S)" s)
+      | Some (Int i) -> Some (Printf.sprintf "@as(%d)" i)
+      | Some (Float f) -> Some (Printf.sprintf "@as(%s)" f)
+      | Some (Bool b) -> Some (Printf.sprintf "@as(%b)" b)
+      | Some (BigInt s) -> Some (Printf.sprintf "@as(%sn)" s)
+      | Some (Untagged _) (* should never happen *) | None -> None
+  in
   let arg () = tree_of_constructor_arguments cd.cd_args in
   match cd.cd_res with
-  | None -> (name, arg (), None)
+  | None -> (name, arg (), None, repr)
   | Some res ->
     let nm = !names in
     names := [];
     let ret = tree_of_typexp false res in
     let args = arg () in
     names := nm;
-    (name, args, Some ret)
+    (name, args, Some ret, repr)
 
 and tree_of_label l =
   let opt =
@@ -967,6 +982,7 @@ let tree_of_extension_constructor id ext es =
       oext_type_params = ty_params;
       oext_args = args;
       oext_ret_type = ret;
+      oext_repr = None;
       oext_private = ext.ext_private;
     }
   in
@@ -1001,161 +1017,6 @@ let value_description id ppf decl =
   !Oprint.out_sig_item ppf (tree_of_value_description id decl)
 
 (* Print a class type *)
-
-let method_type (_, kind, ty) =
-  match (field_kind_repr kind, repr ty) with
-  | Fpresent, {desc = Tpoly (ty, tyl)} -> (ty, tyl)
-  | _, ty -> (ty, [])
-
-let tree_of_metho sch concrete csil (lab, kind, ty) =
-  if lab <> dummy_method then (
-    let kind = field_kind_repr kind in
-    let priv = kind <> Fpresent in
-    let virt = not (Concr.mem lab concrete) in
-    let ty, tyl = method_type (lab, kind, ty) in
-    let tty = tree_of_typexp sch ty in
-    remove_names tyl;
-    Ocsg_method (lab, priv, virt, tty) :: csil)
-  else csil
-
-let rec prepare_class_type params = function
-  | Cty_constr (_p, tyl, cty) ->
-    let sty = Ctype.self_type cty in
-    if
-      List.memq (proxy sty) !visited_objects
-      || (not (List.for_all is_Tvar params))
-      || List.exists (deep_occur sty) tyl
-    then prepare_class_type params cty
-    else List.iter mark_loops tyl
-  | Cty_signature sign ->
-    let sty = repr sign.csig_self in
-    (* Self may have a name *)
-    let px = proxy sty in
-    if List.memq px !visited_objects then add_alias sty
-    else visited_objects := px :: !visited_objects;
-    let fields, _ = Ctype.flatten_fields (Ctype.object_fields sign.csig_self) in
-    List.iter (fun met -> mark_loops (fst (method_type met))) fields;
-    Vars.iter (fun _ (_, _, ty) -> mark_loops ty) sign.csig_vars
-  | Cty_arrow (_, ty, cty) ->
-    mark_loops ty;
-    prepare_class_type params cty
-
-let rec tree_of_class_type sch params = function
-  | Cty_constr (p', tyl, cty) ->
-    let sty = Ctype.self_type cty in
-    if
-      List.memq (proxy sty) !visited_objects
-      || not (List.for_all is_Tvar params)
-    then tree_of_class_type sch params cty
-    else Octy_constr (tree_of_path p', tree_of_typlist true tyl)
-  | Cty_signature sign ->
-    let sty = repr sign.csig_self in
-    let self_ty =
-      if is_aliased sty then
-        Some (Otyp_var (false, name_of_type new_name (proxy sty)))
-      else None
-    in
-    let fields, _ = Ctype.flatten_fields (Ctype.object_fields sign.csig_self) in
-    let csil = [] in
-    let csil =
-      List.fold_left
-        (fun csil (ty1, ty2) -> Ocsg_constraint (ty1, ty2) :: csil)
-        csil
-        (tree_of_constraints params)
-    in
-    let all_vars =
-      Vars.fold (fun l (m, v, t) all -> (l, m, v, t) :: all) sign.csig_vars []
-    in
-    (* Consequence of PR#3607: order of Map.fold has changed! *)
-    let all_vars = List.rev all_vars in
-    let csil =
-      List.fold_left
-        (fun csil (l, m, v, t) ->
-          Ocsg_value (l, m = Mutable, v = Virtual, tree_of_typexp sch t) :: csil)
-        csil all_vars
-    in
-    let csil = List.fold_left (tree_of_metho sch sign.csig_concr) csil fields in
-    Octy_signature (self_ty, List.rev csil)
-  | Cty_arrow (l, ty, cty) ->
-    let lab = string_of_label l in
-    let ty =
-      if is_optional l then
-        match (repr ty).desc with
-        | Tconstr (path, [ty], _) when Path.same path Predef.path_option -> ty
-        | _ -> newconstr (Path.Pident (Ident.create "<hidden>")) []
-      else ty
-    in
-    let tr = tree_of_typexp sch ty in
-    Octy_arrow (lab, tr, tree_of_class_type sch params cty)
-
-let class_type ppf cty =
-  reset ();
-  prepare_class_type [] cty;
-  !Oprint.out_class_type ppf (tree_of_class_type false [] cty)
-
-let tree_of_class_param param variance =
-  ( (match tree_of_typexp true param with
-    | Otyp_var (_, s) -> s
-    | _ -> "?"),
-    if is_Tvar (repr param) then (true, true) else variance )
-
-let class_variance = List.map Variance.(fun v -> (mem May_pos v, mem May_neg v))
-
-let tree_of_class_declaration id cl rs =
-  let params = filter_params cl.cty_params in
-
-  reset ();
-  List.iter add_alias params;
-  prepare_class_type params cl.cty_type;
-  let sty = Ctype.self_type cl.cty_type in
-  List.iter mark_loops params;
-
-  List.iter check_name_of_type (List.map proxy params);
-  if is_aliased sty then check_name_of_type (proxy sty);
-
-  let vir_flag = cl.cty_new = None in
-  Osig_class
-    ( vir_flag,
-      Ident.name id,
-      List.map2 tree_of_class_param params (class_variance cl.cty_variance),
-      tree_of_class_type true params cl.cty_type,
-      tree_of_rec rs )
-
-let class_declaration id ppf cl =
-  !Oprint.out_sig_item ppf (tree_of_class_declaration id cl Trec_first)
-
-let tree_of_cltype_declaration id cl rs =
-  let params = List.map repr cl.clty_params in
-
-  reset ();
-  List.iter add_alias params;
-  prepare_class_type params cl.clty_type;
-  let sty = Ctype.self_type cl.clty_type in
-  List.iter mark_loops params;
-
-  List.iter check_name_of_type (List.map proxy params);
-  if is_aliased sty then check_name_of_type (proxy sty);
-
-  let sign = Ctype.signature_of_class_type cl.clty_type in
-
-  let virt =
-    let fields, _ = Ctype.flatten_fields (Ctype.object_fields sign.csig_self) in
-    List.exists
-      (fun (lab, _, _) ->
-        not (lab = dummy_method || Concr.mem lab sign.csig_concr))
-      fields
-    || Vars.fold (fun _ (_, vr, _) b -> vr = Virtual || b) sign.csig_vars false
-  in
-
-  Osig_class_type
-    ( virt,
-      Ident.name id,
-      List.map2 tree_of_class_param params (class_variance cl.clty_variance),
-      tree_of_class_type true params cl.clty_type,
-      tree_of_rec rs )
-
-let cltype_declaration id ppf cl =
-  !Oprint.out_sig_item ppf (tree_of_cltype_declaration id cl Trec_first)
 
 (* Print a module type *)
 
@@ -1256,7 +1117,7 @@ and trees_of_sigitem = function
     [tree_of_module id md.md_type rs ~ellipsis]
   | Sig_modtype (id, decl) -> [tree_of_modtype_declaration id decl]
   | Sig_class () -> []
-  | Sig_class_type (id, decl, rs) -> [tree_of_cltype_declaration id decl rs]
+  | Sig_class_type () -> []
 
 and tree_of_modtype_declaration id decl =
   let mty =
@@ -1577,7 +1438,7 @@ let super_trace ppf =
   in
   super_trace true ppf
 
-let super_unification_error unif tr txt1 ppf txt2 =
+let super_unification_error ?print_extra_info unif tr txt1 ppf txt2 =
   reset ();
   trace_same_names tr;
   let tr = List.map (fun (t, t') -> (t, hide_variant_name t')) tr in
@@ -1590,16 +1451,19 @@ let super_unification_error unif tr txt1 ppf txt2 =
       let t1, t1' = may_prepare_expansion (tr = []) t1
       and t2, t2' = may_prepare_expansion (tr = []) t2 in
       let tr = List.map prepare_expansion tr in
-      fprintf ppf "@[<v 0>@[<hov 2>%t@ %a@]@,@[<hov 2>%t@ %a@]%a%t@]" txt1
-        (super_type_expansion ~tag:"error" t1)
-        t1' txt2
+      fprintf ppf "@[<v 0>@[<hov 2>%t@ %a@]@,@[<hov 2>%t@ %a@]%a%t%t@]" txt1
+        (super_type_expansion ~tag:"error" t1) t1' txt2
         (super_type_expansion ~tag:"info" t2)
-        t2' super_trace tr (explanation unif mis)
+        t2' super_trace tr (explanation unif mis) (fun ppf ->
+          match print_extra_info with
+          | None -> ()
+          | Some f -> f ppf t1 t2)
     with exn -> raise exn)
 
-let super_report_unification_error ppf env ?(unif = true) tr txt1 txt2 =
+let super_report_unification_error ?print_extra_info ppf env ?(unif = true) tr
+    txt1 txt2 =
   wrap_printing_env env (fun () ->
-      super_unification_error unif tr txt1 ppf txt2)
+      super_unification_error ?print_extra_info unif tr txt1 ppf txt2)
 
 let trace fst keep_last txt ppf tr =
   trace_same_names tr;

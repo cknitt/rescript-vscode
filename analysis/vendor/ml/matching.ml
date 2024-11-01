@@ -1258,15 +1258,6 @@ let matcher_constr cstr =
       | Tpat_any -> Parmatch.omegas cstr.cstr_arity @ rem
       | _ -> raise NoMatch)
 
-let is_not_none_bs_primitve : Lambda.primitive =
-  Pccall (Primitive.simple ~name:"#is_not_none" ~arity:1 ~alloc:false)
-
-let val_from_option_bs_primitive : Lambda.primitive =
-  Pccall (Primitive.simple ~name:"#val_from_option" ~arity:1 ~alloc:true)
-
-let val_from_unnest_option_bs_primitive : Lambda.primitive =
-  Pccall (Primitive.simple ~name:"#val_from_unnest_option" ~arity:1 ~alloc:true)
-
 let make_constr_matching p def ctx = function
   | [] -> fatal_error "Matching.make_constr_matching"
   | (arg, _mut) :: argl ->
@@ -1277,15 +1268,13 @@ let make_constr_matching p def ctx = function
         (arg, Alias) :: argl
       else
         match cstr.cstr_tag with
-        | Cstr_block _
-          when !Config.bs_only && Datarepr.constructor_has_optional_shape cstr
-          ->
+        | Cstr_block _ when Datarepr.constructor_has_optional_shape cstr ->
           let from_option =
             match p.pat_desc with
             | Tpat_construct (_, _, [{pat_type; pat_env}])
               when Typeopt.type_cannot_contain_undefined pat_type pat_env ->
-              val_from_unnest_option_bs_primitive
-            | _ -> val_from_option_bs_primitive
+              Pval_from_option_not_nest
+            | _ -> Pval_from_option
           in
           (Lprim (from_option, [arg], p.pat_loc), Alias) :: argl
         | Cstr_constant _ | Cstr_block _ ->
@@ -1440,7 +1429,7 @@ let get_mod_field modname field =
            Location.none )
      with Not_found -> fatal_error ("Module " ^ modname ^ " unavailable."))
 
-let code_force = get_mod_field "CamlinternalLazy" "force"
+let code_force = get_mod_field Primitive_modules.lazy_ "force"
 
 (* inline_lazy_force inlines the beginning of the code of Lazy.force. When
    the value argument is tagged as:
@@ -1626,12 +1615,6 @@ let divide_array ctx pm =
 
 let strings_test_threshold = 8
 
-let prim_string_notequal =
-  Pccall (Primitive.simple ~name:"caml_string_notequal" ~arity:2 ~alloc:false)
-
-let prim_string_compare =
-  Pccall (Primitive.simple ~name:"caml_string_compare" ~arity:2 ~alloc:false)
-
 let bind_sw arg k =
   match arg with
   | Lvar _ -> k arg
@@ -1654,8 +1637,7 @@ let make_string_test_sequence loc arg sw d =
       List.fold_right
         (fun (s, lam) k ->
           Lifthenelse
-            ( Lprim
-                (prim_string_notequal, [arg; Lconst (Const_immstring s)], loc),
+            ( Lprim (Pstringcomp Cneq, [arg; Lconst (Const_immstring s)], loc),
               k,
               lam ))
         sw d)
@@ -1686,7 +1668,7 @@ let rec do_make_string_test_tree loc arg sw delta d =
   else
     let lt, (s, act), gt = split len sw in
     bind_sw
-      (Lprim (prim_string_compare, [arg; Lconst (Const_immstring s)], loc))
+      (Lprim (Pstringcomp Ceq, [arg; Lconst (Const_immstring s)], loc))
       (fun r ->
         tree_way_test loc r
           (do_make_string_test_tree loc arg lt delta d)
@@ -2160,16 +2142,8 @@ let combine_constant names loc arg cst partial ctx def
     | Const_float _ ->
       make_test_sequence loc fail (Pfloatcomp Cneq) (Pfloatcomp Clt) arg
         const_lambda_list
-    | Const_int32 _ ->
-      make_test_sequence loc fail
-        (Pbintcomp (Pint32, Cneq))
-        (Pbintcomp (Pint32, Clt))
-        arg const_lambda_list
-    | Const_int64 _ ->
-      make_test_sequence loc fail
-        (Pbintcomp (Pint64, Cneq))
-        (Pbintcomp (Pint64, Clt))
-        arg const_lambda_list
+    | Const_int32 _ -> assert false
+    | Const_int64 _ -> assert false
     | Const_bigint _ ->
       make_test_sequence loc fail (Pbigintcomp Cneq) (Pbigintcomp Clt) arg
         const_lambda_list
@@ -2205,57 +2179,45 @@ let split_variant_cases tag_lambda_list =
   let const, nonconst = split_rec tag_lambda_list in
   (sort_int_lambda_list const, sort_int_lambda_list nonconst)
 
-let split_extension_cases tag_lambda_list =
+let get_extension_cases tag_lambda_list =
   let rec split_rec = function
-    | [] -> ([], [])
+    | [] -> []
     | (cstr, act) :: rem -> (
-      let consts, nonconsts = split_rec rem in
+      let nonconsts = split_rec rem in
       match cstr with
-      | Cstr_extension (path, true) when not !Config.bs_only ->
-        ((path, act) :: consts, nonconsts)
-      | Cstr_extension (path, _) -> (consts, (path, act) :: nonconsts)
+      | Cstr_extension path -> (path, act) :: nonconsts
       | _ -> assert false)
   in
   split_rec tag_lambda_list
 
-let extension_slot_eq =
-  Pccall (Primitive.simple ~name:"#extension_slot_eq" ~arity:2 ~alloc:false)
 let combine_constructor sw_names loc arg ex_pat cstr partial ctx def
     (tag_lambda_list, total1, pats) =
   if cstr.cstr_consts < 0 then
     (* Special cases for extensions *)
     let fail, local_jumps = mk_failaction_neg partial ctx def in
     let lambda1 =
-      let consts, nonconsts = split_extension_cases tag_lambda_list in
-      let default, consts, nonconsts =
+      let extension_cases = get_extension_cases tag_lambda_list in
+      let default, extension_cases =
         match fail with
         | None -> (
-          match (consts, nonconsts) with
-          | _, (_, act) :: rem -> (act, consts, rem)
-          | (_, act) :: rem, _ -> (act, rem, nonconsts)
+          match extension_cases with
+          | (_, act) :: rem -> (act, rem)
           | _ -> assert false)
-        | Some fail -> (fail, consts, nonconsts)
+        | Some fail -> (fail, extension_cases)
       in
-      let nonconst_lambda =
-        match nonconsts with
-        | [] -> default
-        | _ ->
-          let tag = Ident.create "tag" in
-          let tests =
-            List.fold_right
-              (fun (path, act) rem ->
-                let ext = transl_extension_path ex_pat.pat_env path in
-                Lifthenelse
-                  (Lprim (extension_slot_eq, [Lvar tag; ext], loc), act, rem))
-              nonconsts default
-          in
-          Llet (Alias, Pgenval, tag, arg, tests)
-      in
-      List.fold_right
-        (fun (path, act) rem ->
-          let ext = transl_extension_path ex_pat.pat_env path in
-          Lifthenelse (Lprim (extension_slot_eq, [arg; ext], loc), act, rem))
-        consts nonconst_lambda
+      match extension_cases with
+      | [] -> default
+      | _ ->
+        let tag = Ident.create "tag" in
+        let tests =
+          List.fold_right
+            (fun (path, act) rem ->
+              let ext = transl_extension_path ex_pat.pat_env path in
+              Lifthenelse
+                (Lprim (Pextension_slot_eq, [Lvar tag; ext], loc), act, rem))
+            extension_cases default
+        in
+        Llet (Alias, Pgenval, tag, arg, tests)
     in
     (lambda1, jumps_union local_jumps total1)
   else
@@ -2281,8 +2243,8 @@ let combine_constructor sw_names loc arg ex_pat cstr partial ctx def
           (* Typically, match on lists, will avoid isint primitive in that
              case *)
           let arg =
-            if !Config.bs_only && Datarepr.constructor_has_optional_shape cstr
-            then Lprim (is_not_none_bs_primitve, [arg], loc)
+            if Datarepr.constructor_has_optional_shape cstr then
+              Lprim (Pis_not_none, [arg], loc)
             else arg
           in
           Lifthenelse (arg, act2, act1)
@@ -2392,17 +2354,7 @@ let combine_variant names loc row arg partial ctx def
       row.row_fields
   else num_constr := max_int;
   let test_int_or_block arg if_int if_block =
-    if !Config.bs_only then
-      Lifthenelse
-        ( Lprim
-            ( Pccall
-                (Primitive.simple ~name:"#is_poly_var_block" ~arity:1
-                   ~alloc:false),
-              [arg],
-              loc ),
-          if_block,
-          if_int )
-    else Lifthenelse (Lprim (Pisint, [arg], loc), if_int, if_block)
+    Lifthenelse (Lprim (Pis_poly_var_block, [arg], loc), if_block, if_int)
   in
   let sig_complete = List.length tag_lambda_list = !num_constr
   and one_action = same_actions tag_lambda_list in
@@ -2942,68 +2894,6 @@ let simple_for_let loc param pat body =
    catch/exit.
 *)
 
-let rec map_return f = function
-  | Llet (str, k, id, l1, l2) -> Llet (str, k, id, l1, map_return f l2)
-  | Lletrec (l1, l2) -> Lletrec (l1, map_return f l2)
-  | Lifthenelse (lcond, lthen, lelse) ->
-    Lifthenelse (lcond, map_return f lthen, map_return f lelse)
-  | Lsequence (l1, l2) -> Lsequence (l1, map_return f l2)
-  | Ltrywith (l1, id, l2) -> Ltrywith (map_return f l1, id, map_return f l2)
-  | Lstaticcatch (l1, b, l2) ->
-    Lstaticcatch (map_return f l1, b, map_return f l2)
-  | (Lstaticraise _ | Lprim (Praise _, _, _)) as l -> l
-  | l -> f l
-
-(* The 'opt' reference indicates if the optimization is worthy.
-
-   It is shared by the different calls to 'assign_pat' performed from
-   'map_return'. For example with the code
-     let (x, y) = if foo then z else (1,2)
-   the else-branch will activate the optimization for both branches.
-
-   That means that the optimization is activated if *there exists* an
-   interesting tuple in one hole of the let-rhs context. We could
-   choose to activate it only if *all* holes are interesting. We made
-   that choice because being optimistic is extremely cheap (one static
-   exit/catch overhead in the "wrong cases"), while being pessimistic
-   can be costly (one unnecessary tuple allocation).
-*)
-
-let assign_pat opt nraise catch_ids loc pat lam =
-  let rec collect acc pat lam =
-    match (pat.pat_desc, lam) with
-    | Tpat_tuple patl, Lprim (Pmakeblock _, lams, _) ->
-      opt := true;
-      List.fold_left2 collect acc patl lams
-    | Tpat_tuple patl, Lconst (Const_block (_, scl)) ->
-      opt := true;
-      let collect_const acc pat sc = collect acc pat (Lconst sc) in
-      List.fold_left2 collect_const acc patl scl
-    | _ ->
-      (* pattern idents will be bound in staticcatch (let body), so we
-         refresh them here to guarantee binders  uniqueness *)
-      let pat_ids = pat_bound_idents pat in
-      let fresh_ids = List.map (fun id -> (id, Ident.rename id)) pat_ids in
-      (fresh_ids, alpha_pat fresh_ids pat, lam) :: acc
-  in
-
-  (* sublets were accumulated by 'collect' with the leftmost tuple
-     pattern at the bottom of the list; to respect right-to-left
-     evaluation order for tuples, we must evaluate sublets
-     top-to-bottom. To preserve tail-rec, we will fold_left the
-     reversed list. *)
-  let rev_sublets = List.rev (collect [] pat lam) in
-  let exit =
-    (* build an Ident.tbl to avoid quadratic refreshing costs *)
-    let add t (id, fresh_id) = Ident.add id fresh_id t in
-    let add_ids acc (ids, _pat, _lam) = List.fold_left add acc ids in
-    let tbl = List.fold_left add_ids Ident.empty rev_sublets in
-    let fresh_var id = Lvar (Ident.find_same id tbl) in
-    Lstaticraise (nraise, List.map fresh_var catch_ids)
-  in
-  let push_sublet code (_ids, pat, lam) = simple_for_let loc lam pat code in
-  List.fold_left push_sublet exit rev_sublets
-
 let for_let loc param pat body =
   match pat.pat_desc with
   | Tpat_any ->
@@ -3013,16 +2903,7 @@ let for_let loc param pat body =
   | Tpat_var (id, _) ->
     (* fast path, and keep track of simple bindings to unboxable numbers *)
     Llet (Strict, Pgenval, id, param, body)
-  | _ ->
-    (* Turn off such optimization to reduce diff in the beginning - FIXME*)
-    if !Config.bs_only then simple_for_let loc param pat body
-    else
-      let opt = ref false in
-      let nraise = next_raise_count () in
-      let catch_ids = pat_bound_idents pat in
-      let bind = map_return (assign_pat opt nraise catch_ids loc pat) param in
-      if !opt then Lstaticcatch (bind, (nraise, catch_ids), body)
-      else simple_for_let loc param pat body
+  | _ -> simple_for_let loc param pat body
 
 (* Handling of tupled functions and matchings *)
 

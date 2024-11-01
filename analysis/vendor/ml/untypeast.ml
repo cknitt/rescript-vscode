@@ -25,11 +25,6 @@ type mapper = {
   attributes: mapper -> T.attribute list -> attribute list;
   case: mapper -> T.case -> case;
   cases: mapper -> T.case list -> case list;
-  class_signature: mapper -> T.class_signature -> class_signature;
-  class_type: mapper -> T.class_type -> class_type;
-  class_type_declaration:
-    mapper -> T.class_type_declaration -> class_type_declaration;
-  class_type_field: mapper -> T.class_type_field -> class_type_field;
   constructor_declaration:
     mapper -> T.constructor_declaration -> constructor_declaration;
   expr: mapper -> T.expression -> expression;
@@ -145,12 +140,8 @@ let structure_item sub item =
       Pstr_recmodule (List.map (sub.module_binding sub) list)
     | Tstr_modtype mtd -> Pstr_modtype (sub.module_type_declaration sub mtd)
     | Tstr_open od -> Pstr_open (sub.open_description sub od)
-    | Tstr_class _list -> Pstr_class ()
-    | Tstr_class_type list ->
-      Pstr_class_type
-        (List.map
-           (fun (_id, _name, ct) -> sub.class_type_declaration sub ct)
-           list)
+    | Tstr_class () -> Pstr_class ()
+    | Tstr_class_type () -> Pstr_class_type ()
     | Tstr_include incl -> Pstr_include (sub.include_declaration sub incl)
     | Tstr_attribute x -> Pstr_attribute x
   in
@@ -284,8 +275,7 @@ let exp_extra sub (extra, loc, attrs) sexp =
   let attrs = sub.attributes sub attrs in
   let desc =
     match extra with
-    | Texp_coerce (cty1, cty2) ->
-      Pexp_coerce (sexp, map_opt (sub.typ sub) cty1, sub.typ sub cty2)
+    | Texp_coerce ((), cty2) -> Pexp_coerce (sexp, (), sub.typ sub cty2)
     | Texp_constraint cty -> Pexp_constraint (sexp, sub.typ sub cty)
     | Texp_open (ovf, _path, lid, _) -> Pexp_open (ovf, map_loc sub lid, sexp)
     | Texp_poly cto -> Pexp_poly (sexp, map_opt (sub.typ sub) cto)
@@ -443,8 +433,7 @@ let signature_item sub item =
     | Tsig_open od -> Psig_open (sub.open_description sub od)
     | Tsig_include incl -> Psig_include (sub.include_description sub incl)
     | Tsig_class () -> Psig_class ()
-    | Tsig_class_type list ->
-      Psig_class_type (List.map (sub.class_type_declaration sub) list)
+    | Tsig_class_type () -> Psig_class_type ()
     | Tsig_attribute x -> Psig_attribute x
   in
   Sig.mk ~loc desc
@@ -461,16 +450,6 @@ let include_infos f sub incl =
 
 let include_declaration sub = include_infos sub.module_expr sub
 let include_description sub = include_infos sub.module_type sub
-
-let class_infos f sub ci =
-  let loc = sub.location sub ci.ci_loc in
-  let attrs = sub.attributes sub ci.ci_attributes in
-  Ci.mk ~loc ~attrs ~virt:ci.ci_virt
-    ~params:(List.map (type_parameter sub) ci.ci_params)
-    (map_loc sub ci.ci_id_name)
-    (f sub ci.ci_expr)
-
-let class_type_declaration sub = class_infos sub.class_type sub
 
 let module_type sub mty =
   let loc = sub.location sub mty.mty_loc in
@@ -526,43 +505,6 @@ let module_expr sub mexpr =
     in
     Mod.mk ~loc ~attrs desc
 
-let class_type sub ct =
-  let loc = sub.location sub ct.cltyp_loc in
-  let attrs = sub.attributes sub ct.cltyp_attributes in
-  let desc =
-    match ct.cltyp_desc with
-    | Tcty_signature csg -> Pcty_signature (sub.class_signature sub csg)
-    | Tcty_constr (_path, lid, list) ->
-      Pcty_constr (map_loc sub lid, List.map (sub.typ sub) list)
-    | Tcty_arrow (label, ct, cl) ->
-      Pcty_arrow (label, sub.typ sub ct, sub.class_type sub cl)
-    | Tcty_open (ovf, _p, lid, _env, e) ->
-      Pcty_open (ovf, lid, sub.class_type sub e)
-  in
-  Cty.mk ~loc ~attrs desc
-
-let class_signature sub cs =
-  {
-    pcsig_self = sub.typ sub cs.csig_self;
-    pcsig_fields = List.map (sub.class_type_field sub) cs.csig_fields;
-  }
-
-let class_type_field sub ctf =
-  let loc = sub.location sub ctf.ctf_loc in
-  let attrs = sub.attributes sub ctf.ctf_attributes in
-  let desc =
-    match ctf.ctf_desc with
-    | Tctf_inherit ct -> Pctf_inherit (sub.class_type sub ct)
-    | Tctf_val (s, mut, virt, ct) ->
-      Pctf_val (mkloc s loc, mut, virt, sub.typ sub ct)
-    | Tctf_method (s, priv, virt, ct) ->
-      Pctf_method (mkloc s loc, priv, virt, sub.typ sub ct)
-    | Tctf_constraint (ct1, ct2) ->
-      Pctf_constraint (sub.typ sub ct1, sub.typ sub ct2)
-    | Tctf_attribute x -> Pctf_attribute x
-  in
-  Ctf.mk ~loc ~attrs desc
-
 let core_type sub ct =
   let loc = sub.location sub ct.ctyp_loc in
   let attrs = sub.attributes sub ct.ctyp_attributes in
@@ -577,8 +519,7 @@ let core_type sub ct =
       Ptyp_constr (map_loc sub lid, List.map (sub.typ sub) list)
     | Ttyp_object (list, o) ->
       Ptyp_object (List.map (sub.object_field sub) list, o)
-    | Ttyp_class (_path, lid, list) ->
-      Ptyp_class (map_loc sub lid, List.map (sub.typ sub) list)
+    | Ttyp_class () -> Ptyp_class ()
     | Ttyp_alias (ct, s) -> Ptyp_alias (sub.typ sub ct, s)
     | Ttyp_variant (list, bool, labels) ->
       Ptyp_variant (List.map (sub.row_field sub) list, bool, labels)
@@ -614,10 +555,6 @@ let default_mapper =
     signature_item;
     module_type;
     with_constraint;
-    class_type;
-    class_type_field;
-    class_signature;
-    class_type_declaration;
     type_declaration;
     type_kind;
     typ = core_type;

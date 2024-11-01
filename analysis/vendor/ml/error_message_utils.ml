@@ -1,3 +1,6 @@
+type extract_concrete_typedecl =
+  Env.t -> Types.type_expr -> Path.t * Path.t * Types.type_declaration
+
 type type_clash_statement = FunctionCall
 type type_clash_context =
   | SetRecordField
@@ -54,7 +57,15 @@ let error_expected_type_text ppf type_clash_context =
     fprintf ppf "But this function is expecting you to return:"
   | _ -> fprintf ppf "But it's expected to have type:"
 
-let print_extra_type_clash_help ppf trace type_clash_context =
+let is_record_type ~extract_concrete_typedecl ~env ty =
+  try
+    match extract_concrete_typedecl env ty with
+    | _, _, {Types.type_kind = Type_record _; _} -> true
+    | _ -> false
+  with _ -> false
+
+let print_extra_type_clash_help ~extract_concrete_typedecl ~env ppf trace
+    type_clash_context =
   match (type_clash_context, trace) with
   | Some (MathOperator {for_float; operator; is_constant}), _ -> (
     let operator_for_other_type =
@@ -162,6 +173,26 @@ let print_extra_type_clash_help ppf trace type_clash_context =
       \  - Use a tuple, if your array is of fixed length. Tuples can mix types \
        freely, and compiles to a JavaScript array. Example of a tuple: `let \
        myTuple = (10, \"hello\", 15.5, true)"
+  | ( _,
+      [
+        ({Types.desc = Tconstr (_p1, _, _)}, _); ({desc = Tconstr (p2, _, _)}, _);
+      ] )
+    when Path.same Predef.path_unit p2 ->
+    fprintf ppf
+      "\n\n\
+      \  - Did you mean to assign this to a variable?\n\
+      \  - If you don't care about the result of this expression, you can \
+       assign it to @{<info>_@} via @{<info>let _ = ...@} or pipe it to \
+       @{<info>ignore@} via @{<info>expression->ignore@}\n\n"
+  | _, [({desc = Tobject _}, _); (({Types.desc = Tconstr _} as t1), _)]
+    when is_record_type ~extract_concrete_typedecl ~env t1 ->
+    fprintf ppf
+      "\n\n\
+      \  You're passing a @{<error>ReScript object@} where a @{<info>record@} \
+       is expected. \n\n\
+      \  - Did you mean to pass a record instead of an object? Objects are \
+       written with quoted keys, and records with unquoted keys. Remove the \
+       quotes from the object keys to pass it as a record instead of object. \n\n"
   | _ -> ()
 
 let type_clash_context_from_function sexp sfunct =
@@ -213,3 +244,91 @@ let type_clash_context_in_statement sexp =
   match sexp.Parsetree.pexp_desc with
   | Pexp_apply _ -> Some (Statement FunctionCall)
   | _ -> None
+
+let print_contextual_unification_error ppf t1 t2 =
+  (* TODO: Maybe we should do the same for Null.t and Nullable.t as we do for options
+     below, now that they also are more first class for values that might not exist? *)
+  match (t1.Types.desc, t2.Types.desc) with
+  | Tconstr (p1, _, _), Tconstr (p2, _, _)
+    when Path.same p1 Predef.path_option
+         && Path.same p2 Predef.path_option <> true ->
+    fprintf ppf
+      "@,\
+       @\n\
+       @[<v 0>You're expecting the value you're pattern matching on to be an \
+       @{<info>option@}, but the value is actually not an option.@ Change your \
+       pattern match to work on the concrete value (remove @{<error>Some(_)@} \
+       or @{<error>None@} from the pattern) to make it work.@]"
+  | Tconstr (p1, _, _), Tconstr (p2, _, _)
+    when Path.same p2 Predef.path_option
+         && Path.same p1 Predef.path_option <> true ->
+    fprintf ppf
+      "@,\
+       @\n\
+       @[<v 0>The value you're pattern matching on here is wrapped in an \
+       @{<info>option@}, but you're trying to match on the actual value.@ Wrap \
+       the highlighted pattern in @{<info>Some()@} to make it work.@]"
+  | _ -> ()
+
+type jsx_prop_error_info = {
+  fields: Types.label_declaration list;
+  props_record_path: Path.t;
+}
+
+let attributes_include_jsx_component_props (attrs : Parsetree.attributes) =
+  attrs
+  |> List.exists (fun ({Location.txt}, _) -> txt = "res.jsxComponentProps")
+
+let path_to_jsx_component_name p =
+  match p |> Path.name |> String.split_on_char '.' |> List.rev with
+  | "props" :: component_name :: _ -> Some component_name
+  | _ -> None
+
+let get_jsx_component_props
+    ~(extract_concrete_typedecl : extract_concrete_typedecl) env ty p =
+  match Path.last p with
+  | "props" -> (
+    try
+      match extract_concrete_typedecl env ty with
+      | ( _p0,
+          _p,
+          {Types.type_kind = Type_record (fields, _repr); type_attributes} )
+        when attributes_include_jsx_component_props type_attributes ->
+        Some {props_record_path = p; fields}
+      | _ -> None
+    with _ -> None)
+  | _ -> None
+
+let print_component_name ppf (p : Path.t) =
+  match path_to_jsx_component_name p with
+  | Some component_name -> fprintf ppf "@{<info><%s />@} " component_name
+  | None -> ()
+
+let print_component_wrong_prop_error ppf (p : Path.t)
+    (_fields : Types.label_declaration list) name =
+  fprintf ppf "@[<v>";
+  (match name with
+  | "children" ->
+    fprintf ppf
+      "@[<2>This JSX component does not accept child elements. It has no \
+       @{<error>children@} prop "
+  | _ ->
+    fprintf ppf
+      "@[<2>The prop @{<error>%s@} does not belong to the JSX component " name);
+  print_component_name ppf p;
+  fprintf ppf "@]@,@,"
+
+let print_component_labels_missing_error ppf labels
+    (error_info : jsx_prop_error_info) =
+  fprintf ppf "@[<hov>The component ";
+  print_component_name ppf error_info.props_record_path;
+  fprintf ppf "is missing these required props:@\n";
+  labels |> List.iter (fun lbl -> fprintf ppf "@ %s" lbl);
+  fprintf ppf "@]"
+
+let get_jsx_component_error_info ~extract_concrete_typedecl opath env ty_record
+    () =
+  match opath with
+  | Some (p, _) ->
+    get_jsx_component_props ~extract_concrete_typedecl env ty_record p
+  | None -> None

@@ -7,16 +7,9 @@ let standard_library =
 
 let standard_library_default = standard_library
 
-let syntax_kind = ref `ml
-
-let bs_only = ref true
-
 let unsafe_empty_array = ref false
 
-type uncurried = Legacy | Uncurried | Swap
-let uncurried = ref Legacy
-
-and cmi_magic_number = "Caml1999I022"
+let cmi_magic_number = "Caml1999I022"
 
 and ast_impl_magic_number = "Caml1999M022"
 
@@ -25,8 +18,6 @@ and ast_intf_magic_number = "Caml1999N022"
 and cmt_magic_number = "Caml1999T022"
 
 let load_path = ref ([] : string list)
-
-let interface_suffix = ref ".mli"
 
 (* This is normally the same as in obj.ml, but we have to define it
    separately because it can differ when we're in the middle of a

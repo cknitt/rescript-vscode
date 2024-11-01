@@ -329,6 +329,7 @@ type extension_constructor = {
   ext_private: private_flag;
   ext_loc: Location.t;
   ext_attributes: Parsetree.attributes;
+  ext_is_exception: bool;
 }
 
 and type_transparence =
@@ -339,37 +340,6 @@ and type_transparence =
 (* Type expressions for the class language *)
 
 module Concr : Set.S with type elt = string
-
-type class_type =
-  | Cty_constr of Path.t * type_expr list * class_type
-  | Cty_signature of class_signature
-  | Cty_arrow of arg_label * type_expr * class_type
-
-and class_signature = {
-  csig_self: type_expr;
-  csig_vars: (Asttypes.mutable_flag * Asttypes.virtual_flag * type_expr) Vars.t;
-  csig_concr: Concr.t;
-  csig_inher: (Path.t * type_expr list) list;
-}
-
-type class_declaration = {
-  cty_params: type_expr list;
-  mutable cty_type: class_type;
-  cty_path: Path.t;
-  cty_new: type_expr option;
-  cty_variance: Variance.t list;
-  cty_loc: Location.t;
-  cty_attributes: Parsetree.attributes;
-}
-
-type class_type_declaration = {
-  clty_params: type_expr list;
-  clty_type: class_type;
-  clty_path: Path.t;
-  clty_variance: Variance.t list;
-  clty_loc: Location.t;
-  clty_attributes: Parsetree.attributes;
-}
 
 (* Type expressions for the module language *)
 
@@ -390,7 +360,7 @@ and signature_item =
   | Sig_module of Ident.t * module_declaration * rec_status
   | Sig_modtype of Ident.t * modtype_declaration
   | Sig_class of unit
-  | Sig_class_type of Ident.t * class_type_declaration * rec_status
+  | Sig_class_type of unit (* Dummy AST node *)
 
 and module_declaration = {
   md_type: module_type;
@@ -438,9 +408,7 @@ and constructor_tag =
   | Cstr_constant of int (* Constant constructor (an int) *)
   | Cstr_block of int (* Regular constructor (a block) *)
   | Cstr_unboxed (* Constructor of an unboxed type *)
-  | Cstr_extension of Path.t * bool
-(* Extension constructor
-   true if a constant false if a block*)
+  | Cstr_extension of Path.t (* Extension constructor *)
 
 (* Constructors are the same *)
 val equal_tag : constructor_tag -> constructor_tag -> bool
@@ -455,7 +423,8 @@ type label_description = {
   lbl_arg: type_expr; (* Type of the argument *)
   lbl_mut: mutable_flag; (* Is this a mutable field? *)
   lbl_pos: int; (* Position in block *)
-  lbl_all: label_description array; (* All the labels in this type *)
+  mutable lbl_all: label_description array;
+  (* All the labels in this type. This is mutable only because of a specific feature related to dicts, and should not be mutated elsewhere. *)
   lbl_repres: record_representation; (* Representation for this record *)
   lbl_private: private_flag; (* Read-only field? *)
   lbl_loc: Location.t;

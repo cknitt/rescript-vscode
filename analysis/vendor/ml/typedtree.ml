@@ -66,7 +66,7 @@ and expression = {
 
 and exp_extra =
   | Texp_constraint of core_type
-  | Texp_coerce of core_type option * core_type
+  | Texp_coerce of unit * core_type
   | Texp_open of override_flag * Path.t * Longident.t loc * Env.t
   | Texp_poly of core_type option
   | Texp_newtype of string
@@ -177,7 +177,7 @@ and structure_item_desc =
   | Tstr_modtype of module_type_declaration
   | Tstr_open of open_description
   | Tstr_class of unit
-  | Tstr_class_type of (Ident.t * string loc * class_type_declaration) list
+  | Tstr_class_type of unit
   | Tstr_include of include_declaration
   | Tstr_attribute of attribute
 
@@ -254,7 +254,7 @@ and signature_item_desc =
   | Tsig_open of open_description
   | Tsig_include of include_description
   | Tsig_class of unit
-  | Tsig_class_type of class_type_declaration list
+  | Tsig_class_type of unit
   | Tsig_attribute of attribute
 
 and module_declaration = {
@@ -314,7 +314,7 @@ and core_type_desc =
   | Ttyp_tuple of core_type list
   | Ttyp_constr of Path.t * Longident.t loc * core_type list
   | Ttyp_object of object_field list * closed_flag
-  | Ttyp_class of Path.t * Longident.t loc * core_type list
+  | Ttyp_class of unit (* dummy AST node *)
   | Ttyp_alias of core_type * string
   | Ttyp_variant of row_field list * closed_flag * label list option
   | Ttyp_poly of string list * core_type
@@ -407,58 +407,6 @@ and extension_constructor = {
 and extension_constructor_kind =
   | Text_decl of constructor_arguments * core_type option
   | Text_rebind of Path.t * Longident.t loc
-
-and class_type = {
-  cltyp_desc: class_type_desc;
-  cltyp_type: Types.class_type;
-  cltyp_env: Env.t;
-  cltyp_loc: Location.t;
-  cltyp_attributes: attribute list;
-}
-
-and class_type_desc =
-  | Tcty_constr of Path.t * Longident.t loc * core_type list
-  | Tcty_signature of class_signature
-  | Tcty_arrow of arg_label * core_type * class_type
-  | Tcty_open of override_flag * Path.t * Longident.t loc * Env.t * class_type
-
-and class_signature = {
-  csig_self: core_type;
-  csig_fields: class_type_field list;
-  csig_type: Types.class_signature;
-}
-
-and class_type_field = {
-  ctf_desc: class_type_field_desc;
-  ctf_loc: Location.t;
-  ctf_attributes: attribute list;
-}
-
-and class_type_field_desc =
-  | Tctf_inherit of class_type
-  | Tctf_val of (string * mutable_flag * virtual_flag * core_type)
-  | Tctf_method of (string * private_flag * virtual_flag * core_type)
-  | Tctf_constraint of (core_type * core_type)
-  | Tctf_attribute of attribute
-
-and class_description = class_type class_infos
-
-and class_type_declaration = class_type class_infos
-
-and 'a class_infos = {
-  ci_virt: virtual_flag;
-  ci_params: (core_type * variance) list;
-  ci_id_name: string loc;
-  ci_id_class: Ident.t;
-  ci_id_class_type: Ident.t;
-  ci_id_object: Ident.t;
-  ci_id_typehash: Ident.t;
-  ci_expr: 'a;
-  ci_decl: Types.class_declaration;
-  ci_type_decl: Types.class_type_declaration;
-  ci_loc: Location.t;
-  ci_attributes: attribute list;
-}
 
 (* Auxiliary functions over the a.s.t. *)
 

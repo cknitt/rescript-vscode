@@ -60,22 +60,6 @@ val check_coherence : Env.t -> Location.t -> Ident.t -> type_declaration -> unit
 (* for fixed types *)
 val is_fixed_type : Parsetree.type_declaration -> bool
 
-(* for typeclass.ml *)
-val compute_variance_decls :
-  Env.t ->
-  (Ident.t
-  * Types.type_declaration
-  * Types.type_declaration
-  * Types.class_declaration
-  * Types.class_type_declaration
-  * 'a Typedtree.class_infos)
-  list ->
-  (Types.type_declaration
-  * Types.type_declaration
-  * Types.class_declaration
-  * Types.class_type_declaration)
-  list
-
 (* for typeopt.ml *)
 val get_unboxed_type_representation : Env.t -> type_expr -> type_expr option
 

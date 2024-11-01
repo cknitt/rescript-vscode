@@ -61,18 +61,7 @@ let remove_loc =
   let open Ast_mapper in
   {default_mapper with location = (fun _this _loc -> Location.none)}
 
-let is_not_doc = function
-  | {Location.txt = "ocaml.doc"}, _ -> false
-  | {Location.txt = "ocaml.text"}, _ -> false
-  | {Location.txt = "doc"}, _ -> false
-  | {Location.txt = "text"}, _ -> false
-  | _ -> true
-
 let attrs s x =
-  let x =
-    if s.for_saving && not !Clflags.keep_docs then Ext_list.filter x is_not_doc
-    else x
-  in
   if s.for_saving && not !Clflags.keep_locs then
     remove_loc.Ast_mapper.attributes remove_loc x
   else x
@@ -309,47 +298,6 @@ let type_declaration s decl =
   cleanup_types ();
   decl
 
-let class_signature s sign =
-  {
-    csig_self = typexp s sign.csig_self;
-    csig_vars =
-      Vars.map
-        (function
-          | m, v, t -> (m, v, typexp s t))
-        sign.csig_vars;
-    csig_concr = sign.csig_concr;
-    csig_inher =
-      List.map
-        (fun (p, tl) -> (type_path s p, List.map (typexp s) tl))
-        sign.csig_inher;
-  }
-
-let rec class_type s = function
-  | Cty_constr (p, tyl, cty) ->
-    Cty_constr (type_path s p, List.map (typexp s) tyl, class_type s cty)
-  | Cty_signature sign -> Cty_signature (class_signature s sign)
-  | Cty_arrow (l, ty, cty) -> Cty_arrow (l, typexp s ty, class_type s cty)
-
-let cltype_declaration s decl =
-  let decl =
-    {
-      clty_params = List.map (typexp s) decl.clty_params;
-      clty_variance = decl.clty_variance;
-      clty_type = class_type s decl.clty_type;
-      clty_path = type_path s decl.clty_path;
-      clty_loc = loc s decl.clty_loc;
-      clty_attributes = attrs s decl.clty_attributes;
-    }
-  in
-  (* Do clean up even if saving: type_declaration may be recursive *)
-  cleanup_types ();
-  decl
-
-let class_type s cty =
-  let cty = class_type s cty in
-  cleanup_types ();
-  cty
-
 let value_description s descr =
   {
     val_type = type_expr s descr.val_type;
@@ -368,6 +316,7 @@ let extension_constructor s ext =
       ext_private = ext.ext_private;
       ext_attributes = attrs s ext.ext_attributes;
       ext_loc = (if s.for_saving then Location.none else ext.ext_loc);
+      ext_is_exception = ext.ext_is_exception;
     }
   in
   cleanup_types ();
@@ -386,10 +335,7 @@ let rec rename_bound_idents s idents = function
     rename_bound_idents
       (add_modtype id (Mty_ident (Pident id')) s)
       (id' :: idents) sg
-  | Sig_class_type (id, _, _) :: sg ->
-    (* cheat and pretend they are types cf. PR#6650 *)
-    let id' = Ident.rename id in
-    rename_bound_idents (add_type id (Pident id') s) (id' :: idents) sg
+  | Sig_class_type () :: _ -> assert false
   | (Sig_value (id, _) | Sig_typext (id, _, _)) :: sg ->
     let id' = Ident.rename id in
     rename_bound_idents s (id' :: idents) sg
@@ -424,8 +370,7 @@ and signature_component s comp newid =
   | Sig_module (_id, d, rs) -> Sig_module (newid, module_declaration s d, rs)
   | Sig_modtype (_id, d) -> Sig_modtype (newid, modtype_declaration s d)
   | Sig_class () -> Sig_class ()
-  | Sig_class_type (_id, d, rs) ->
-    Sig_class_type (newid, cltype_declaration s d, rs)
+  | Sig_class_type () -> Sig_class_type ()
 
 and module_declaration s decl =
   {

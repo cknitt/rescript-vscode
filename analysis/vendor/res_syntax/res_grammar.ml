@@ -59,6 +59,7 @@ type t =
   | Pattern
   | AttributePayload
   | TagNames
+  | DictRows
 
 let to_string = function
   | OpenDescription -> "an open description"
@@ -120,6 +121,7 @@ let to_string = function
   | ExprFor -> "a for expression"
   | AttributePayload -> "an attribute payload"
   | TagNames -> "tag names"
+  | DictRows -> "rows of a dict"
 
 let is_signature_item_start = function
   | Token.At | Let | Typ | External | Exception | Open | Include | Module | AtAt
@@ -129,14 +131,14 @@ let is_signature_item_start = function
 
 let is_atomic_pattern_start = function
   | Token.Int _ | String _ | Codepoint _ | Backtick | Lparen | Lbracket | Lbrace
-  | Underscore | Lident _ | Uident _ | List | Exception | Percent ->
+  | Underscore | Lident _ | Uident _ | List | Dict | Exception | Percent ->
     true
   | _ -> false
 
 let is_atomic_expr_start = function
   | Token.True | False | Int _ | String _ | Float _ | Codepoint _ | Backtick
   | Uident _ | Lident _ | Hash | Lparen | List | Lbracket | Lbrace | LessThan
-  | Module | Percent ->
+  | Module | Percent | Forwardslash | ForwardslashDot | Dict ->
     true
   | _ -> false
 
@@ -151,7 +153,7 @@ let is_expr_start = function
   | For | Hash | If | Int _ | Lbrace | Lbracket | LessThan | Lident _ | List
   | Lparen | Minus | MinusDot | Module | Percent | Plus | PlusDot | String _
   | Switch | True | Try | Uident _ | Underscore (* _ => doThings() *)
-  | While ->
+  | While | Forwardslash | ForwardslashDot | Dict ->
     true
   | _ -> false
 
@@ -168,8 +170,9 @@ let is_structure_item_start = function
 
 let is_pattern_start = function
   | Token.Int _ | Float _ | String _ | Codepoint _ | Backtick | True | False
-  | Minus | Plus | Lparen | Lbracket | Lbrace | List | Underscore | Lident _
-  | Uident _ | Hash | Exception | Percent | Module | At ->
+  | Minus | Plus | Lparen | Lbracket | Lbrace | List | Dict | Underscore
+  | DotDotDot | Lident _ | Uident _ | Hash | Exception | Percent | Module | At
+    ->
     true
   | _ -> false
 
@@ -219,6 +222,10 @@ let is_mod_expr_start = function
     true
   | _ -> false
 
+let is_dict_row_start = function
+  | Token.String _ -> true
+  | _ -> false
+
 let is_record_row_start = function
   | Token.DotDotDot -> true
   | Token.Uident _ | Lident _ -> true
@@ -257,10 +264,10 @@ let is_jsx_child_start = is_atomic_expr_start
 
 let is_block_expr_start = function
   | Token.Assert | At | Await | Backtick | Bang | Codepoint _ | Exception
-  | False | Float _ | For | Forwardslash | Hash | If | Int _ | Lbrace | Lbracket
-  | LessThan | Let | Lident _ | List | Lparen | Minus | MinusDot | Module | Open
-  | Percent | Plus | PlusDot | String _ | Switch | True | Try | Uident _
-  | Underscore | While ->
+  | False | Float _ | For | Forwardslash | ForwardslashDot | Hash | If | Int _
+  | Lbrace | Lbracket | LessThan | Let | Lident _ | List | Lparen | Minus
+  | MinusDot | Module | Open | Percent | Plus | PlusDot | String _ | Switch
+  | True | Try | Uident _ | Underscore | While | Dict ->
     true
   | _ -> false
 
@@ -278,6 +285,7 @@ let is_list_element grammar token =
   | FunctorArgs -> is_functor_arg_start token
   | ModExprList -> is_mod_expr_start token
   | TypeParameters -> is_type_parameter_start token
+  | DictRows -> is_dict_row_start token
   | RecordRows -> is_record_row_start token
   | RecordRowsStringKey -> is_record_row_string_key_start token
   | ArgumentList -> is_argument_start token

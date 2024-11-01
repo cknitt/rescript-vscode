@@ -28,13 +28,6 @@ type iterator = {
   attributes: iterator -> attribute list -> unit;
   case: iterator -> case -> unit;
   cases: iterator -> case list -> unit;
-  class_expr: iterator -> class_expr -> unit;
-  class_field: iterator -> class_field -> unit;
-  class_signature: iterator -> class_signature -> unit;
-  class_structure: iterator -> class_structure -> unit;
-  class_type: iterator -> class_type -> unit;
-  class_type_declaration: iterator -> class_type_declaration -> unit;
-  class_type_field: iterator -> class_type_field -> unit;
   constructor_declaration: iterator -> constructor_declaration -> unit;
   expr: iterator -> expression -> unit;
   extension: iterator -> extension -> unit;
@@ -111,9 +104,7 @@ module T = struct
       iter_loc sub lid;
       List.iter (sub.typ sub) tl
     | Ptyp_object (ol, _o) -> List.iter (object_field sub) ol
-    | Ptyp_class (lid, tl) ->
-      iter_loc sub lid;
-      List.iter (sub.typ sub) tl
+    | Ptyp_class () -> ()
     | Ptyp_alias (t, _) -> sub.typ sub t
     | Ptyp_variant (rl, _b, _ll) -> List.iter (row_field sub) rl
     | Ptyp_poly (_, t) -> sub.typ sub t
@@ -180,44 +171,6 @@ module T = struct
     sub.attributes sub pext_attributes
 end
 
-module CT = struct
-  (* Type expressions for the class language *)
-
-  let iter sub {pcty_loc = loc; pcty_desc = desc; pcty_attributes = attrs} =
-    sub.location sub loc;
-    sub.attributes sub attrs;
-    match desc with
-    | Pcty_constr (lid, tys) ->
-      iter_loc sub lid;
-      List.iter (sub.typ sub) tys
-    | Pcty_signature x -> sub.class_signature sub x
-    | Pcty_arrow (_lab, t, ct) ->
-      sub.typ sub t;
-      sub.class_type sub ct
-    | Pcty_extension x -> sub.extension sub x
-    | Pcty_open (_ovf, lid, e) ->
-      iter_loc sub lid;
-      sub.class_type sub e
-
-  let iter_field sub {pctf_desc = desc; pctf_loc = loc; pctf_attributes = attrs}
-      =
-    sub.location sub loc;
-    sub.attributes sub attrs;
-    match desc with
-    | Pctf_inherit ct -> sub.class_type sub ct
-    | Pctf_val (_s, _m, _v, t) -> sub.typ sub t
-    | Pctf_method (_s, _p, _v, t) -> sub.typ sub t
-    | Pctf_constraint (t1, t2) ->
-      sub.typ sub t1;
-      sub.typ sub t2
-    | Pctf_attribute x -> sub.attribute sub x
-    | Pctf_extension x -> sub.extension sub x
-
-  let iter_signature sub {pcsig_self; pcsig_fields} =
-    sub.typ sub pcsig_self;
-    List.iter (sub.class_type_field sub) pcsig_fields
-end
-
 module MT = struct
   (* Type expressions for the module language *)
 
@@ -265,7 +218,7 @@ module MT = struct
     | Psig_open x -> sub.open_description sub x
     | Psig_include x -> sub.include_description sub x
     | Psig_class () -> ()
-    | Psig_class_type l -> List.iter (sub.class_type_declaration sub) l
+    | Psig_class_type () -> ()
     | Psig_extension (x, attrs) ->
       sub.extension sub x;
       sub.attributes sub attrs
@@ -310,7 +263,7 @@ module M = struct
     | Pstr_modtype x -> sub.module_type_declaration sub x
     | Pstr_open x -> sub.open_description sub x
     | Pstr_class () -> ()
-    | Pstr_class_type l -> List.iter (sub.class_type_declaration sub) l
+    | Pstr_class_type () -> ()
     | Pstr_include x -> sub.include_declaration sub x
     | Pstr_extension (x, attrs) ->
       sub.extension sub x;
@@ -375,9 +328,8 @@ module E = struct
       sub.expr sub e1;
       sub.expr sub e2;
       sub.expr sub e3
-    | Pexp_coerce (e, t1, t2) ->
+    | Pexp_coerce (e, (), t2) ->
       sub.expr sub e;
-      iter_opt (sub.typ sub) t1;
       sub.typ sub t2
     | Pexp_constraint (e, t) ->
       sub.expr sub e;
@@ -401,7 +353,7 @@ module E = struct
     | Pexp_poly (e, t) ->
       sub.expr sub e;
       iter_opt (sub.typ sub) t
-    | Pexp_object cls -> sub.class_structure sub cls
+    | Pexp_object () -> ()
     | Pexp_newtype (_s, e) -> sub.expr sub e
     | Pexp_pack me -> sub.module_expr sub me
     | Pexp_open (_ovf, lid, e) ->
@@ -449,77 +401,6 @@ module P = struct
       sub.pat sub p
 end
 
-module CE = struct
-  (* Value expressions for the class language *)
-
-  let iter sub {pcl_loc = loc; pcl_desc = desc; pcl_attributes = attrs} =
-    sub.location sub loc;
-    sub.attributes sub attrs;
-    match desc with
-    | Pcl_constr (lid, tys) ->
-      iter_loc sub lid;
-      List.iter (sub.typ sub) tys
-    | Pcl_structure s -> sub.class_structure sub s
-    | Pcl_fun (_lab, e, p, ce) ->
-      iter_opt (sub.expr sub) e;
-      sub.pat sub p;
-      sub.class_expr sub ce
-    | Pcl_apply (ce, l) ->
-      sub.class_expr sub ce;
-      List.iter (iter_snd (sub.expr sub)) l
-    | Pcl_let (_r, vbs, ce) ->
-      List.iter (sub.value_binding sub) vbs;
-      sub.class_expr sub ce
-    | Pcl_constraint (ce, ct) ->
-      sub.class_expr sub ce;
-      sub.class_type sub ct
-    | Pcl_extension x -> sub.extension sub x
-    | Pcl_open (_ovf, lid, e) ->
-      iter_loc sub lid;
-      sub.class_expr sub e
-
-  let iter_kind sub = function
-    | Cfk_concrete (_o, e) -> sub.expr sub e
-    | Cfk_virtual t -> sub.typ sub t
-
-  let iter_field sub {pcf_desc = desc; pcf_loc = loc; pcf_attributes = attrs} =
-    sub.location sub loc;
-    sub.attributes sub attrs;
-    match desc with
-    | Pcf_inherit () -> ()
-    | Pcf_val (s, _m, k) ->
-      iter_loc sub s;
-      iter_kind sub k
-    | Pcf_method (s, _p, k) ->
-      iter_loc sub s;
-      iter_kind sub k
-    | Pcf_constraint (t1, t2) ->
-      sub.typ sub t1;
-      sub.typ sub t2
-    | Pcf_initializer e -> sub.expr sub e
-    | Pcf_attribute x -> sub.attribute sub x
-    | Pcf_extension x -> sub.extension sub x
-
-  let iter_structure sub {pcstr_self; pcstr_fields} =
-    sub.pat sub pcstr_self;
-    List.iter (sub.class_field sub) pcstr_fields
-
-  let class_infos sub f
-      {
-        pci_virt = _;
-        pci_params = pl;
-        pci_name;
-        pci_expr;
-        pci_loc;
-        pci_attributes;
-      } =
-    List.iter (iter_fst (sub.typ sub)) pl;
-    iter_loc sub pci_name;
-    f pci_expr;
-    sub.location sub pci_loc;
-    sub.attributes sub pci_attributes
-end
-
 (* Now, a generic AST mapper, to be extended to cover all kinds and
    cases of the OCaml grammar.  The default behavior of the mapper is
    the identity. *)
@@ -533,14 +414,6 @@ let default_iterator =
     signature_item = MT.iter_signature_item;
     module_type = MT.iter;
     with_constraint = MT.iter_with_constraint;
-    class_expr = CE.iter;
-    class_field = CE.iter_field;
-    class_structure = CE.iter_structure;
-    class_type = CT.iter;
-    class_type_field = CT.iter_field;
-    class_signature = CT.iter_signature;
-    class_type_declaration =
-      (fun this -> CE.class_infos this (this.class_type this));
     type_declaration = T.iter_type_declaration;
     type_kind = T.iter_type_kind;
     typ = T.iter;

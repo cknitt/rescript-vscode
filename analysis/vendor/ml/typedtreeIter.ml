@@ -36,12 +36,7 @@ module type IteratorArgument = sig
   val enter_module_type : module_type -> unit
   val enter_module_expr : module_expr -> unit
   val enter_with_constraint : with_constraint -> unit
-  val enter_class_signature : class_signature -> unit
 
-  val enter_class_description : class_description -> unit
-  val enter_class_type_declaration : class_type_declaration -> unit
-  val enter_class_type : class_type -> unit
-  val enter_class_type_field : class_type_field -> unit
   val enter_core_type : core_type -> unit
   val enter_structure_item : structure_item -> unit
 
@@ -58,12 +53,7 @@ module type IteratorArgument = sig
   val leave_module_type : module_type -> unit
   val leave_module_expr : module_expr -> unit
   val leave_with_constraint : with_constraint -> unit
-  val leave_class_signature : class_signature -> unit
 
-  val leave_class_description : class_description -> unit
-  val leave_class_type_declaration : class_type_declaration -> unit
-  val leave_class_type : class_type -> unit
-  val leave_class_type_field : class_type_field -> unit
   val leave_core_type : core_type -> unit
   val leave_structure_item : structure_item -> unit
 
@@ -129,8 +119,7 @@ end = struct
     | Tstr_modtype mtd -> iter_module_type_declaration mtd
     | Tstr_open _ -> ()
     | Tstr_class () -> ()
-    | Tstr_class_type list ->
-      List.iter (fun (_, _, ct) -> iter_class_type_declaration ct) list
+    | Tstr_class_type () -> ()
     | Tstr_include incl -> iter_module_expr incl.incl_mod
     | Tstr_attribute _ -> ());
     Iter.leave_structure_item item
@@ -230,9 +219,7 @@ end = struct
         | cstr, _, _attrs -> (
           match cstr with
           | Texp_constraint ct -> iter_core_type ct
-          | Texp_coerce (cty1, cty2) ->
-            option iter_core_type cty1;
-            iter_core_type cty2
+          | Texp_coerce ((), cty2) -> iter_core_type cty2
           | Texp_open _ -> ()
           | Texp_poly cto -> option iter_core_type cto
           | Texp_newtype _ -> ()))
@@ -339,7 +326,7 @@ end = struct
     | Tsig_open _ -> ()
     | Tsig_include incl -> iter_module_type incl.incl_mod
     | Tsig_class () -> ()
-    | Tsig_class_type list -> List.iter iter_class_type_declaration list
+    | Tsig_class_type () -> ()
     | Tsig_attribute _ -> ());
     Iter.leave_signature_item item
 
@@ -349,12 +336,6 @@ end = struct
     | None -> ()
     | Some mtype -> iter_module_type mtype);
     Iter.leave_module_type_declaration mtd
-
-  and iter_class_type_declaration cd =
-    Iter.enter_class_type_declaration cd;
-    List.iter iter_type_parameter cd.ci_params;
-    iter_class_type cd.ci_expr;
-    Iter.leave_class_type_declaration cd
 
   and iter_module_type mty =
     Iter.enter_module_type mty;
@@ -399,35 +380,6 @@ end = struct
     (*          iter_module_type mty *);
     Iter.leave_module_expr mexpr
 
-  and iter_class_type ct =
-    Iter.enter_class_type ct;
-    (match ct.cltyp_desc with
-    | Tcty_signature csg -> iter_class_signature csg
-    | Tcty_constr (_path, _, list) -> List.iter iter_core_type list
-    | Tcty_arrow (_label, ct, cl) ->
-      iter_core_type ct;
-      iter_class_type cl
-    | Tcty_open (_, _, _, _, e) -> iter_class_type e);
-    Iter.leave_class_type ct
-
-  and iter_class_signature cs =
-    Iter.enter_class_signature cs;
-    iter_core_type cs.csig_self;
-    List.iter iter_class_type_field cs.csig_fields;
-    Iter.leave_class_signature cs
-
-  and iter_class_type_field ctf =
-    Iter.enter_class_type_field ctf;
-    (match ctf.ctf_desc with
-    | Tctf_inherit ct -> iter_class_type ct
-    | Tctf_val (_s, _mut, _virt, ct) -> iter_core_type ct
-    | Tctf_method (_s, _priv, _virt, ct) -> iter_core_type ct
-    | Tctf_constraint (ct1, ct2) ->
-      iter_core_type ct1;
-      iter_core_type ct2
-    | Tctf_attribute _ -> ());
-    Iter.leave_class_type_field ctf
-
   and iter_core_type ct =
     Iter.enter_core_type ct;
     (match ct.ctyp_desc with
@@ -439,7 +391,7 @@ end = struct
     | Ttyp_tuple list -> List.iter iter_core_type list
     | Ttyp_constr (_path, _, list) -> List.iter iter_core_type list
     | Ttyp_object (list, _o) -> List.iter iter_object_field list
-    | Ttyp_class (_path, _, list) -> List.iter iter_core_type list
+    | Ttyp_class () -> ()
     | Ttyp_alias (ct, _s) -> iter_core_type ct
     | Ttyp_variant (list, _bool, _labels) -> List.iter iter_row_field list
     | Ttyp_poly (_list, ct) -> iter_core_type ct
@@ -470,12 +422,7 @@ module DefaultIteratorArgument = struct
   let enter_module_type _ = ()
   let enter_module_expr _ = ()
   let enter_with_constraint _ = ()
-  let enter_class_signature _ = ()
 
-  let enter_class_description _ = ()
-  let enter_class_type_declaration _ = ()
-  let enter_class_type _ = ()
-  let enter_class_type_field _ = ()
   let enter_core_type _ = ()
   let enter_structure_item _ = ()
 
@@ -492,12 +439,7 @@ module DefaultIteratorArgument = struct
   let leave_module_type _ = ()
   let leave_module_expr _ = ()
   let leave_with_constraint _ = ()
-  let leave_class_signature _ = ()
 
-  let leave_class_description _ = ()
-  let leave_class_type_declaration _ = ()
-  let leave_class_type _ = ()
-  let leave_class_type_field _ = ()
   let leave_core_type _ = ()
   let leave_structure_item _ = ()
 

@@ -126,11 +126,7 @@ let classify env ty =
     | Tconstr (p, _args, _abbrev) -> (
       if Path.same p Predef.path_float then Float
       else if Path.same p Predef.path_lazy_t then Lazy
-      else if
-        Path.same p Predef.path_string
-        || Path.same p Predef.path_bytes
-        || Path.same p Predef.path_array
-        || Path.same p Predef.path_int64
+      else if Path.same p Predef.path_string || Path.same p Predef.path_array
       then Addr
       else
         try

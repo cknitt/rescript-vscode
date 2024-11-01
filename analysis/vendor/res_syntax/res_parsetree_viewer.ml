@@ -1,9 +1,12 @@
 open Parsetree
 
-let arrow_type ?(arity = max_int) ct =
+let arrow_type ?(arity = max_int) ?(attrs = []) ct =
+  let has_as_attr attrs =
+    Ext_list.exists attrs (fun (x, _) -> x.Asttypes.txt = "as")
+  in
   let rec process attrs_before acc typ arity =
     match typ with
-    | typ when arity <= 0 -> (attrs_before, List.rev acc, typ)
+    | typ when arity < 0 -> (attrs_before, List.rev acc, typ)
     | {
      ptyp_desc = Ptyp_arrow ((Nolabel as lbl), typ1, typ2);
      ptyp_attributes = [];
@@ -25,15 +28,28 @@ let arrow_type ?(arity = max_int) ct =
      ptyp_desc = Ptyp_arrow (((Labelled _ | Optional _) as lbl), typ1, typ2);
      ptyp_attributes = attrs;
     } ->
+      (* Res_core.parse_es6_arrow_type has a workaround that removed an extra arity for the function if the
+         argument is a Ptyp_any with @as attribute i.e. ~x: @as(`{prop: value}`) _.
+
+         When this case is encountered we add that missing arity so the arrow is printed properly.
+      *)
+      let arity =
+        match typ1 with
+        | {ptyp_desc = Ptyp_any; ptyp_attributes = attrs1}
+          when has_as_attr attrs1 ->
+          arity
+        | _ -> arity - 1
+      in
       let arg = (attrs, lbl, typ1) in
-      process attrs_before (arg :: acc) typ2 (arity - 1)
+      process attrs_before (arg :: acc) typ2 arity
     | typ -> (attrs_before, List.rev acc, typ)
   in
   match ct with
-  | {ptyp_desc = Ptyp_arrow (Nolabel, _typ1, _typ2); ptyp_attributes = attrs} as
-    typ ->
+  | {ptyp_desc = Ptyp_arrow (Nolabel, _typ1, _typ2); ptyp_attributes = attrs1}
+    as typ ->
+    let attrs = attrs @ attrs1 in
     process attrs [] {typ with ptyp_attributes = []} arity
-  | typ -> process [] [] typ arity
+  | typ -> process attrs [] typ arity
 
 let functor_type modtype =
   let rec process acc modtype =
@@ -48,30 +64,6 @@ let functor_type modtype =
   in
   process [] modtype
 
-let process_bs_attribute attrs =
-  let rec process bs_spotted acc attrs =
-    match attrs with
-    | [] -> (bs_spotted, List.rev acc)
-    | ({Location.txt = "bs"}, _) :: rest -> process true acc rest
-    | attr :: rest -> process bs_spotted (attr :: acc) rest
-  in
-  process false [] attrs
-
-let process_uncurried_app_attribute attrs =
-  let rec process uncurried_app acc attrs =
-    match attrs with
-    | [] -> (uncurried_app, List.rev acc)
-    | ( {
-          Location.txt =
-            "bs" (* still support @bs to convert .ml files *) | "res.uapp";
-        },
-        _ )
-      :: rest ->
-      process true acc rest
-    | attr :: rest -> process uncurried_app (attr :: acc) rest
-  in
-  process false [] attrs
-
 let process_partial_app_attribute attrs =
   let rec process partial_app acc attrs =
     match attrs with
@@ -81,17 +73,19 @@ let process_partial_app_attribute attrs =
   in
   process false [] attrs
 
-type function_attributes_info = {
-  async: bool;
-  bs: bool;
-  attributes: Parsetree.attributes;
-}
+let has_partial_attribute attrs =
+  List.exists
+    (function
+      | {Location.txt = "res.partial"}, _ -> true
+      | _ -> false)
+    attrs
+
+type function_attributes_info = {async: bool; attributes: Parsetree.attributes}
 
 let process_function_attributes attrs =
   let rec process async bs acc attrs =
     match attrs with
-    | [] -> {async; bs; attributes = List.rev acc}
-    | ({Location.txt = "bs"}, _) :: rest -> process async true acc rest
+    | [] -> {async; attributes = List.rev acc}
     | ({Location.txt = "res.async"}, _) :: rest -> process true bs acc rest
     | attr :: rest -> process async bs (attr :: acc) rest
   in
@@ -103,6 +97,19 @@ let has_await_attribute attrs =
       | {Location.txt = "res.await"}, _ -> true
       | _ -> false)
     attrs
+
+let has_res_pat_variant_spread_attribute attrs =
+  List.exists
+    (function
+      | {Location.txt = "res.patVariantSpread"}, _ -> true
+      | _ -> false)
+    attrs
+
+let has_dict_pattern_attribute attrs =
+  attrs
+  |> List.find_opt (fun (({txt}, _) : Parsetree.attribute) ->
+         txt = "res.dictPattern")
+  |> Option.is_some
 
 let collect_array_expressions expr =
   match expr.pexp_desc with
@@ -224,10 +231,10 @@ let filter_parsing_attrs attrs =
       match attr with
       | ( {
             Location.txt =
-              ( "bs" | "res.uapp" | "res.arity" | "res.braces" | "ns.braces"
-              | "res.iflet" | "res.namedArgLoc" | "res.optional" | "res.ternary"
-              | "res.async" | "res.await" | "res.template"
-              | "res.taggedTemplate" );
+              ( "res.arity" | "res.braces" | "ns.braces" | "res.iflet"
+              | "res.namedArgLoc" | "res.optional" | "res.ternary" | "res.async"
+              | "res.await" | "res.template" | "res.taggedTemplate"
+              | "res.patVariantSpread" | "res.dictPattern" );
           },
           _ ) ->
         false
@@ -381,9 +388,8 @@ let has_attributes attrs =
       match attr with
       | ( {
             Location.txt =
-              ( "bs" | "res.uapp" | "res.arity" | "res.braces" | "ns.braces"
-              | "res.iflet" | "res.ternary" | "res.async" | "res.await"
-              | "res.template" );
+              ( "res.arity" | "res.braces" | "ns.braces" | "res.iflet"
+              | "res.ternary" | "res.async" | "res.await" | "res.template" );
           },
           _ ) ->
         false
@@ -566,9 +572,8 @@ let is_printable_attribute attr =
   match attr with
   | ( {
         Location.txt =
-          ( "bs" | "res.uapp" | "res.arity" | "res.iflet" | "res.braces"
-          | "ns.braces" | "JSX" | "res.async" | "res.await" | "res.template"
-          | "res.ternary" );
+          ( "res.arity" | "res.iflet" | "res.braces" | "ns.braces" | "JSX"
+          | "res.async" | "res.await" | "res.template" | "res.ternary" );
       },
       _ ) ->
     false
@@ -752,4 +757,14 @@ let is_underscore_apply_sugar expr =
 let is_rewritten_underscore_apply_sugar expr =
   match expr.pexp_desc with
   | Pexp_ident {txt = Longident.Lident "_"} -> true
+  | _ -> false
+
+let is_tuple_array (expr : Parsetree.expression) =
+  let is_plain_tuple (expr : Parsetree.expression) =
+    match expr with
+    | {pexp_desc = Pexp_tuple _} -> true
+    | _ -> false
+  in
+  match expr with
+  | {pexp_desc = Pexp_array items} -> List.for_all is_plain_tuple items
   | _ -> false

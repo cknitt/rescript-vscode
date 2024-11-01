@@ -573,19 +573,7 @@ and approx_sig env ssg =
       in
       let newenv = Env.add_signature sg env in
       sg @ approx_sig newenv srem
-    | Psig_class_type sdecls ->
-      let decls = Typeclass.approx_class_declarations env sdecls in
-      let rem = approx_sig env srem in
-      List.flatten
-        (map_rec
-           (fun rs decl ->
-             let open Typeclass in
-             [
-               Sig_class_type (decl.clsty_ty_id, decl.clsty_ty_decl, rs);
-               Sig_type (decl.clsty_obj_id, decl.clsty_obj_abbr, rs);
-               Sig_type (decl.clsty_typesharp_id, decl.clsty_abbr, rs);
-             ])
-           decls [rem])
+    | Psig_class_type () -> assert false
     | Psig_class () -> assert false
     | _ -> approx_sig env srem)
 
@@ -883,26 +871,7 @@ and transl_signature env sg =
         let trem, rem, final_env = transl_sig newenv srem in
         (mksig (Tsig_include incl) env loc :: trem, sg @ rem, final_env)
       | Psig_class _ -> assert false
-      | Psig_class_type cl ->
-        List.iter (fun {pci_name} -> check_name check_type names pci_name) cl;
-        let classes, newenv = Typeclass.class_type_declarations env cl in
-        let trem, rem, final_env = transl_sig newenv srem in
-        ( mksig
-            (Tsig_class_type
-               (List.map (fun decl -> decl.Typeclass.clsty_info) classes))
-            env loc
-          :: trem,
-          List.flatten
-            (map_rec
-               (fun rs decl ->
-                 let open Typeclass in
-                 [
-                   Sig_class_type (decl.clsty_ty_id, decl.clsty_ty_decl, rs);
-                   Sig_type (decl.clsty_obj_id, decl.clsty_obj_abbr, rs);
-                   Sig_type (decl.clsty_typesharp_id, decl.clsty_abbr, rs);
-                 ])
-               classes [rem]),
-          final_env )
+      | Psig_class_type _ -> assert false
       | Psig_attribute x ->
         Builtin_attributes.warning_attribute x;
         let trem, rem, final_env = transl_sig env srem in
@@ -1599,32 +1568,7 @@ and type_structure ?(toplevel = false) funct_body anchor env sstr scope =
       let _path, newenv, od = type_open ~toplevel env sod in
       (Tstr_open od, [], newenv)
     | Pstr_class () -> assert false
-    | Pstr_class_type cl ->
-      List.iter (fun {pci_name} -> check_name check_type names pci_name) cl;
-      let classes, new_env = Typeclass.class_type_declarations env cl in
-      ( Tstr_class_type
-          (List.map
-             (fun cl ->
-               ( cl.Typeclass.clsty_ty_id,
-                 cl.Typeclass.clsty_id_loc,
-                 cl.Typeclass.clsty_info ))
-             classes),
-        (* TODO: check with Jacques why this is here
-                  Tstr_type
-                    (List.map (fun (_, _, i, d, _, _) -> (i, d)) classes) ::
-                  Tstr_type
-                    (List.map (fun (_, _, _, _, i, d) -> (i, d)) classes) :: *)
-        List.flatten
-          (map_rec
-             (fun rs decl ->
-               let open Typeclass in
-               [
-                 Sig_class_type (decl.clsty_ty_id, decl.clsty_ty_decl, rs);
-                 Sig_type (decl.clsty_obj_id, decl.clsty_obj_abbr, rs);
-                 Sig_type (decl.clsty_typesharp_id, decl.clsty_abbr, rs);
-               ])
-             classes []),
-        new_env )
+    | Pstr_class_type () -> assert false
     | Pstr_include sincl ->
       let smodl = sincl.pincl_mod in
       let modl =
@@ -1797,14 +1741,14 @@ let type_implementation_more ?check_exists sourcefile outputprefix modulename
       type_structure initial_env ast (Location.in_file sourcefile)
     in
     let simple_sg = simplify_signature sg in
-    let sourceintf =
-      Filename.remove_extension sourcefile ^ !Config.interface_suffix
-    in
     let mli_status = !Clflags.assume_no_mli in
     if mli_status = Clflags.Mli_exists then (
       let intf_file =
         try find_in_path_uncap !Config.load_path (modulename ^ ".cmi")
         with Not_found ->
+          let sourceintf =
+            Filename.remove_extension sourcefile ^ Literals.suffix_resi
+          in
           raise
             (Error
                ( Location.in_file sourcefile,

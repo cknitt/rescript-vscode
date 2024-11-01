@@ -111,7 +111,7 @@ let expand_head : (Env.t -> Types.type_expr -> Types.type_expr) ref =
 
 let process_tag_type (attrs : Parsetree.attributes) =
   let st : tag_type option ref = ref None in
-  Ext_list.iter attrs (fun ({txt; loc}, payload) ->
+  Ext_list.iter attrs (fun (({txt; loc}, payload) as attr) ->
       match txt with
       | "as" ->
         if !st = None then (
@@ -135,7 +135,8 @@ let process_tag_type (attrs : Parsetree.attributes) =
           | Some (Lident "null") -> st := Some Null
           | Some (Lident "undefined") -> st := Some Undefined
           | Some _ -> raise (Error (loc, InvalidVariantAsAnnotation)));
-          if !st = None then raise (Error (loc, InvalidVariantAsAnnotation)))
+          if !st = None then raise (Error (loc, InvalidVariantAsAnnotation))
+          else Used_attributes.mark_used_attribute attr)
         else raise (Error (loc, Duplicated_bs_as))
       | _ -> ());
   !st
@@ -371,6 +372,14 @@ module DynamicChecks = struct
     | Not of 'a t
     | Expr of 'a
 
+  let rec size = function
+    | BinOp (_, x, y) -> 1 + size x + size y
+    | TagType _ -> 1
+    | TypeOf x -> 1 + size x
+    | IsInstanceOf (_, x) -> 1 + size x
+    | Not x -> 1 + size x
+    | Expr _ -> 1
+
   let bin op x y = BinOp (op, x, y)
   let tag_type t = TagType t
   let typeof x = TypeOf x
@@ -395,7 +404,7 @@ module DynamicChecks = struct
   let ( &&& ) x y = bin And x y
 
   let rec is_a_literal_case ~(literal_cases : tag_type list) ~block_cases
-      (e : _ t) =
+      ~list_literal_cases (e : _ t) =
     let literals_overlaps_with_string () =
       Ext_list.exists literal_cases (function
         | String _ -> true
@@ -457,12 +466,33 @@ module DynamicChecks = struct
           Ext_list.fold_right others is_literal_1 (fun literal_n acc ->
               is_literal_case literal_n ||| acc))
     in
-    match block_cases with
-    | [c] -> is_not_block_case c
-    | c1 :: (_ :: _ as rest) ->
-      is_not_block_case c1
-      &&& is_a_literal_case ~literal_cases ~block_cases:rest e
-    | [] -> assert false
+    if list_literal_cases then
+      let rec mk cases =
+        match List.rev cases with
+        | [case] -> is_literal_case case
+        | case :: rest -> is_literal_case case ||| mk rest
+        | [] -> assert false
+      in
+      mk literal_cases
+    else
+      match block_cases with
+      | [c] -> is_not_block_case c
+      | c1 :: (_ :: _ as rest) ->
+        is_not_block_case c1
+        &&& is_a_literal_case ~literal_cases ~block_cases:rest
+              ~list_literal_cases e
+      | [] -> assert false
+
+  let is_a_literal_case ~literal_cases ~block_cases e =
+    let with_literal_cases =
+      is_a_literal_case ~literal_cases ~block_cases ~list_literal_cases:true e
+    in
+    let without_literal_cases =
+      is_a_literal_case ~literal_cases ~block_cases ~list_literal_cases:false e
+    in
+    if size with_literal_cases <= size without_literal_cases then
+      with_literal_cases
+    else without_literal_cases
 
   let is_int_tag ?(has_null_undefined_other = (false, false, false)) (e : _ t) :
       _ t =

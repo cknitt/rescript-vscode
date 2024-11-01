@@ -196,11 +196,16 @@ let scan_identifier scanner =
     (String.sub [@doesNotRaise]) scanner.src start_off
       (scanner.offset - start_off)
   in
-  if '{' == scanner.ch && str = "list" then (
+  match (scanner, str) with
+  | {ch = '{'}, "list" ->
     next scanner;
     (* TODO: this isn't great *)
-    Token.lookup_keyword "list{")
-  else Token.lookup_keyword str
+    Token.lookup_keyword "list{"
+  | {ch = '{'}, "dict" ->
+    next scanner;
+    (* TODO: this isn't great *)
+    Token.lookup_keyword "dict{"
+  | _ -> Token.lookup_keyword str
 
 let scan_digits scanner ~base =
   if base <= 10 then
@@ -536,6 +541,64 @@ let scan_escape scanner =
   (* Consume \' *)
   (* TODO: do we know it's \' ? *)
   Token.Codepoint {c = codepoint; original = contents}
+
+let scan_regex scanner =
+  let start_pos = position scanner in
+  let buf = Buffer.create 0 in
+  let first_char_offset = scanner.offset in
+  let last_offset_in_buf = ref first_char_offset in
+
+  let bring_buf_up_to_date ~start_offset =
+    let str_up_to_now =
+      (String.sub scanner.src !last_offset_in_buf
+         (start_offset - !last_offset_in_buf) [@doesNotRaise])
+    in
+    Buffer.add_string buf str_up_to_now;
+    last_offset_in_buf := start_offset
+  in
+
+  let result ~first_char_offset ~last_char_offset =
+    if Buffer.length buf = 0 then
+      (String.sub [@doesNotRaise]) scanner.src first_char_offset
+        (last_char_offset - first_char_offset)
+    else (
+      bring_buf_up_to_date ~start_offset:last_char_offset;
+      Buffer.contents buf)
+  in
+  let rec scan () =
+    match scanner.ch with
+    | '/' ->
+      let last_char_offset = scanner.offset in
+      next scanner;
+      let pattern = result ~first_char_offset ~last_char_offset in
+      let flags =
+        let flags_buf = Buffer.create 0 in
+        let rec scan_flags () =
+          match scanner.ch with
+          | 'd' | 'g' | 'i' | 'm' | 's' | 'u' | 'v' | 'y' ->
+            Buffer.add_char flags_buf scanner.ch;
+            next scanner;
+            scan_flags ()
+          | _ -> Buffer.contents flags_buf
+        in
+        scan_flags ()
+      in
+      (pattern, flags)
+    | ch when ch == '\n' || ch == hacky_eof_char ->
+      let end_pos = position scanner in
+      scanner.err ~start_pos ~end_pos (Diagnostics.message "unterminated regex");
+      ("", "")
+    | '\\' ->
+      next scanner;
+      next scanner;
+      scan ()
+    | _ ->
+      next scanner;
+      scan ()
+  in
+  let pattern, flags = scan () in
+  let end_pos = position scanner in
+  (start_pos, end_pos, Token.Regex (pattern, flags))
 
 let scan_single_line_comment scanner =
   let start_off = scanner.offset in

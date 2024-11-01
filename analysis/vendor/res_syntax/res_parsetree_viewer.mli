@@ -3,6 +3,7 @@
    * we restructure the tree into (a, b, c) and its returnType d *)
 val arrow_type :
   ?arity:int ->
+  ?attrs:Parsetree.attributes ->
   Parsetree.core_type ->
   Parsetree.attributes
   * (Parsetree.attributes * Asttypes.arg_label * Parsetree.core_type) list
@@ -14,26 +15,20 @@ val functor_type :
   list
   * Parsetree.module_type
 
-(* filters @bs out of the provided attributes *)
-val process_bs_attribute : Parsetree.attributes -> bool * Parsetree.attributes
-
-val process_uncurried_app_attribute :
-  Parsetree.attributes -> bool * Parsetree.attributes
-
 val process_partial_app_attribute :
   Parsetree.attributes -> bool * Parsetree.attributes
 
-type function_attributes_info = {
-  async: bool;
-  bs: bool;
-  attributes: Parsetree.attributes;
-}
+val has_partial_attribute : Parsetree.attributes -> bool
+
+type function_attributes_info = {async: bool; attributes: Parsetree.attributes}
 
 (* determines whether a function is async and/or uncurried based on the given attributes *)
 val process_function_attributes :
   Parsetree.attributes -> function_attributes_info
 
 val has_await_attribute : Parsetree.attributes -> bool
+val has_res_pat_variant_spread_attribute : Parsetree.attributes -> bool
+val has_dict_pattern_attribute : Parsetree.attributes -> bool
 
 type if_condition_kind =
   | If of Parsetree.expression
@@ -172,3 +167,5 @@ val has_if_let_attribute : Parsetree.attributes -> bool
 val is_rewritten_underscore_apply_sugar : Parsetree.expression -> bool
 
 val is_fun_newtype : Parsetree.expression -> bool
+
+val is_tuple_array : Parsetree.expression -> bool

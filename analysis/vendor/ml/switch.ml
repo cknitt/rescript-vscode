@@ -496,14 +496,9 @@ let rec pkey chan  = function
     match l with
     | 0 -> do_make_if_out (Arg.make_const d) ctx.arg (mk_ifso ctx) (mk_ifno ctx)
     | _ ->
-      if (*true || *) !Config.bs_only then
-        do_make_if_out (Arg.make_const d)
-          (Arg.make_offset ctx.arg (-l))
-          (mk_ifso ctx) (mk_ifno ctx)
-      else
-        Arg.bind (Arg.make_offset ctx.arg (-l)) (fun arg ->
-            let ctx = {off = -l + ctx.off; arg} in
-            do_make_if_out (Arg.make_const d) arg (mk_ifso ctx) (mk_ifno ctx))
+      do_make_if_out (Arg.make_const d)
+        (Arg.make_offset ctx.arg (-l))
+        (mk_ifso ctx) (mk_ifno ctx)
 
   let do_make_if_in h arg ifso ifno =
     Arg.make_if (Arg.make_isin h arg) ifso ifno
@@ -512,14 +507,9 @@ let rec pkey chan  = function
     match l with
     | 0 -> do_make_if_in (Arg.make_const d) ctx.arg (mk_ifso ctx) (mk_ifno ctx)
     | _ ->
-      if (*true || *) !Config.bs_only then
-        do_make_if_in (Arg.make_const d)
-          (Arg.make_offset ctx.arg (-l))
-          (mk_ifso ctx) (mk_ifno ctx)
-      else
-        Arg.bind (Arg.make_offset ctx.arg (-l)) (fun arg ->
-            let ctx = {off = -l + ctx.off; arg} in
-            do_make_if_in (Arg.make_const d) arg (mk_ifso ctx) (mk_ifno ctx))
+      do_make_if_in (Arg.make_const d)
+        (Arg.make_offset ctx.arg (-l))
+        (mk_ifso ctx) (mk_ifno ctx)
 
   let rec c_test ctx ({cases; actions} as s) =
     let lcases = Array.length cases in
@@ -655,15 +645,7 @@ let rec pkey chan  = function
     let acts = Array.make !index actions.(0) in
     Hashtbl.iter (fun act i -> acts.(i) <- actions.(act)) t;
     fun ctx ->
-      if !Config.bs_only then
-        Arg.make_switch ~offset:(ll + ctx.off) loc ctx.arg tbl acts sw_names
-      else
-        match -ll - ctx.off with
-        | 0 -> Arg.make_switch loc ctx.arg tbl acts sw_names ~offset:0
-        | _ ->
-          Arg.bind
-            (Arg.make_offset ctx.arg (-ll - ctx.off))
-            (fun arg -> Arg.make_switch loc arg tbl acts sw_names ~offset:0)
+      Arg.make_switch ~offset:(ll + ctx.off) loc ctx.arg tbl acts sw_names
 
   let make_clusters loc ({cases; actions} as s) n_clusters k sw_names =
     let len = Array.length cases in

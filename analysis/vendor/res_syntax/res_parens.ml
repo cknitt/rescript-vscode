@@ -111,6 +111,11 @@ let unary_expr_operand expr =
       Parenthesized
     | _ when ParsetreeViewer.has_await_attribute expr.pexp_attributes ->
       Parenthesized
+    | {pexp_desc = Pexp_construct ({txt = Lident "Function$"}, Some expr)}
+      when ParsetreeViewer.is_underscore_apply_sugar expr ->
+      Nothing
+    | {pexp_desc = Pexp_construct ({txt = Lident "Function$"}, Some _)} ->
+      Parenthesized
     | _ -> Nothing)
 
 let binary_expr_operand ~is_lhs expr =
@@ -278,6 +283,11 @@ let field_expr expr =
       Parenthesized
     | _ when ParsetreeViewer.has_await_attribute expr.pexp_attributes ->
       Parenthesized
+    | {pexp_desc = Pexp_construct ({txt = Lident "Function$"}, Some expr)}
+      when ParsetreeViewer.is_underscore_apply_sugar expr ->
+      Nothing
+    | {pexp_desc = Pexp_construct ({txt = Lident "Function$"}, Some _)} ->
+      Parenthesized
     | _ -> Nothing)
 
 let set_field_expr_rhs expr =
@@ -440,6 +450,23 @@ let braced_expr expr =
 let include_mod_expr mod_expr =
   match mod_expr.Parsetree.pmod_desc with
   | Parsetree.Pmod_constraint _ -> true
+  | _ -> false
+
+let mod_expr_parens mod_expr =
+  match mod_expr with
+  | {
+   Parsetree.pmod_desc =
+     Pmod_constraint
+       ( {Parsetree.pmod_desc = Pmod_structure _},
+         {Parsetree.pmty_desc = Pmty_signature [{psig_desc = Psig_module _}]} );
+  } ->
+    false
+  | {
+   Parsetree.pmod_desc =
+     Pmod_constraint
+       (_, {Parsetree.pmty_desc = Pmty_signature [{psig_desc = Psig_module _}]});
+  } ->
+    true
   | _ -> false
 
 let arrow_return_typ_expr typ_expr =

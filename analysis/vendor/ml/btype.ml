@@ -300,10 +300,7 @@ type type_iterators = {
   it_extension_constructor: type_iterators -> extension_constructor -> unit;
   it_module_declaration: type_iterators -> module_declaration -> unit;
   it_modtype_declaration: type_iterators -> modtype_declaration -> unit;
-  it_class_declaration: type_iterators -> class_declaration -> unit;
-  it_class_type_declaration: type_iterators -> class_type_declaration -> unit;
   it_module_type: type_iterators -> module_type -> unit;
-  it_class_type: type_iterators -> class_type -> unit;
   it_type_kind: type_iterators -> type_kind -> unit;
   it_do_type_expr: type_iterators -> type_expr -> unit;
   it_type_expr: type_iterators -> type_expr -> unit;
@@ -339,7 +336,7 @@ let type_iterators =
     | Sig_module (_, md, _) -> it.it_module_declaration it md
     | Sig_modtype (_, mtd) -> it.it_modtype_declaration it mtd
     | Sig_class () -> assert false
-    | Sig_class_type (_, ctd, _) -> it.it_class_type_declaration it ctd
+    | Sig_class_type () -> assert false
   and it_value_description it vd = it.it_type_expr it vd.val_type
   and it_type_declaration it td =
     List.iter (it.it_type_expr it) td.type_params;
@@ -352,37 +349,12 @@ let type_iterators =
     may (it.it_type_expr it) td.ext_ret_type
   and it_module_declaration it md = it.it_module_type it md.md_type
   and it_modtype_declaration it mtd = may (it.it_module_type it) mtd.mtd_type
-  and it_class_declaration it cd =
-    List.iter (it.it_type_expr it) cd.cty_params;
-    it.it_class_type it cd.cty_type;
-    may (it.it_type_expr it) cd.cty_new;
-    it.it_path cd.cty_path
-  and it_class_type_declaration it ctd =
-    List.iter (it.it_type_expr it) ctd.clty_params;
-    it.it_class_type it ctd.clty_type;
-    it.it_path ctd.clty_path
   and it_module_type it = function
     | Mty_ident p | Mty_alias (_, p) -> it.it_path p
     | Mty_signature sg -> it.it_signature it sg
     | Mty_functor (_, mto, mt) ->
       may (it.it_module_type it) mto;
       it.it_module_type it mt
-  and it_class_type it = function
-    | Cty_constr (p, tyl, cty) ->
-      it.it_path p;
-      List.iter (it.it_type_expr it) tyl;
-      it.it_class_type it cty
-    | Cty_signature cs ->
-      it.it_type_expr it cs.csig_self;
-      Vars.iter (fun _ (_, _, ty) -> it.it_type_expr it ty) cs.csig_vars;
-      List.iter
-        (fun (p, tl) ->
-          it.it_path p;
-          List.iter (it.it_type_expr it) tl)
-        cs.csig_inher
-    | Cty_arrow (_, ty, cty) ->
-      it.it_type_expr it ty;
-      it.it_class_type it cty
   and it_type_kind it kind = iter_type_expr_kind (it.it_type_expr it) kind
   and it_do_type_expr it ty =
     iter_type_expr (it.it_type_expr it) ty;
@@ -399,11 +371,8 @@ let type_iterators =
     it_type_expr = it_do_type_expr;
     it_do_type_expr;
     it_type_kind;
-    it_class_type;
     it_module_type;
     it_signature;
-    it_class_type_declaration;
-    it_class_declaration;
     it_modtype_declaration;
     it_module_declaration;
     it_extension_constructor;
@@ -546,12 +515,6 @@ let unmark_extension_constructor ext =
   List.iter unmark_type ext.ext_type_params;
   iter_type_expr_cstr_args unmark_type ext.ext_args;
   Misc.may unmark_type ext.ext_ret_type
-
-let unmark_class_signature sign =
-  unmark_type sign.csig_self;
-  Vars.iter (fun _l (_m, _v, t) -> unmark_type t) sign.csig_vars
-
-let unmark_class_type cty = unmark_iterators.it_class_type unmark_iterators cty
 
 (*******************************************)
 (*  Memorization of abbreviation expansion *)

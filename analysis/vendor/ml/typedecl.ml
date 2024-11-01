@@ -206,19 +206,10 @@ let make_params env params =
   List.map make_param params
 
 let transl_labels ?record_name env closed lbls =
-  (if !Config.bs_only then
-     match !Builtin_attributes.check_duplicated_labels lbls with
-     | None -> ()
-     | Some {loc; txt = name} ->
-       raise (Error (loc, Duplicate_label (name, record_name)))
-   else
-     let all_labels = ref StringSet.empty in
-     List.iter
-       (fun {pld_name = {txt = name; loc}} ->
-         if StringSet.mem name !all_labels then
-           raise (Error (loc, Duplicate_label (name, record_name)));
-         all_labels := StringSet.add name !all_labels)
-       lbls);
+  (match !Builtin_attributes.check_duplicated_labels lbls with
+  | None -> ()
+  | Some {loc; txt = name} ->
+    raise (Error (loc, Duplicate_label (name, record_name))));
   let mk
       {
         pld_name = name;
@@ -1370,30 +1361,6 @@ let add_injectivity =
     | Contravariant -> (false, true, false)
     | Invariant -> (false, false, false))
 
-(* for typeclass.ml *)
-let compute_variance_decls env cldecls =
-  let decls, required =
-    List.fold_right
-      (fun (obj_id, obj_abbr, _cl_abbr, _clty, _cltydef, ci) (decls, req) ->
-        let variance = List.map snd ci.ci_params in
-        ( (obj_id, obj_abbr) :: decls,
-          (add_injectivity variance, ci.ci_loc) :: req ))
-      cldecls ([], [])
-  in
-  let decls, _ =
-    compute_properties_fixpoint env decls required
-      (List.map init_variance decls)
-      (List.map (fun _ -> false) decls)
-  in
-  List.map2
-    (fun (_, decl) (_, _, cl_abbr, clty, cltydef, _) ->
-      let variance = decl.type_variance in
-      ( decl,
-        {cl_abbr with type_variance = variance},
-        {clty with cty_variance = variance},
-        {cltydef with clty_variance = variance} ))
-    decls cldecls
-
 (* Check multiple declarations of labels/constructors *)
 
 let check_duplicates sdecl_list =
@@ -1661,7 +1628,7 @@ let transl_extension_constructor env type_path type_params typext_params priv
       | _ -> ());
       let path =
         match cdescr.cstr_tag with
-        | Cstr_extension (path, _) -> path
+        | Cstr_extension path -> path
         | _ -> assert false
       in
       let args =
@@ -1685,24 +1652,26 @@ let transl_extension_constructor env type_path type_params typext_params priv
       in
       (args, ret_type, Text_rebind (path, lid))
   in
+  let is_exception = Path.same type_path Predef.path_exn in
   let ext =
     {
-      ext_type_path = type_path;
+      Types.ext_type_path = type_path;
       ext_type_params = typext_params;
       ext_args = args;
       ext_ret_type = ret_type;
       ext_private = priv;
-      Types.ext_loc = sext.pext_loc;
-      Types.ext_attributes = sext.pext_attributes;
+      ext_loc = sext.pext_loc;
+      ext_attributes = sext.pext_attributes;
+      ext_is_exception = is_exception;
     }
   in
   {
-    ext_id = id;
+    Typedtree.ext_id = id;
     ext_name = sext.pext_name;
     ext_type = ext;
     ext_kind = kind;
-    Typedtree.ext_loc = sext.pext_loc;
-    Typedtree.ext_attributes = sext.pext_attributes;
+    ext_loc = sext.pext_loc;
+    ext_attributes = sext.pext_attributes;
   }
 
 let transl_extension_constructor env type_path type_params typext_params priv
@@ -1827,26 +1796,23 @@ let transl_exception env sext =
   let newenv = Env.add_extension ~check:true ext.ext_id ext.ext_type env in
   (ext, newenv)
 
-let rec parse_native_repr_attributes env core_type ty =
+let rec arity_from_arrow_type env core_type ty =
   match (core_type.ptyp_desc, (Ctype.repr ty).desc) with
   | Ptyp_arrow (_, _, ct2), Tarrow (_, _, t2, _) ->
-    let repr_arg = Same_as_ocaml_repr in
-    let repr_args, repr_res = parse_native_repr_attributes env ct2 t2 in
-    (repr_arg :: repr_args, repr_res)
+    1 + arity_from_arrow_type env ct2 t2
   | Ptyp_arrow _, _ | _, Tarrow _ -> assert false
-  | _ -> ([], Same_as_ocaml_repr)
+  | _ -> 0
 
-let parse_native_repr_attributes env core_type ty =
-  match (core_type.ptyp_desc, (Ctype.repr ty).desc) with
-  | ( Ptyp_constr
-        ({txt = Lident "function$"}, [{ptyp_desc = Ptyp_arrow (_, _, ct2)}; _]),
-      Tconstr
-        (Pident {name = "function$"}, [{desc = Tarrow (_, _, t2, _)}; _], _) )
-    ->
-    let repr_args, repr_res = parse_native_repr_attributes env ct2 t2 in
-    let native_repr_args = Same_as_ocaml_repr :: repr_args in
-    (native_repr_args, repr_res)
-  | _ -> parse_native_repr_attributes env core_type ty
+let parse_arity env core_type ty =
+  match Ast_uncurried.uncurried_type_get_arity_opt ~env ty with
+  | Some arity ->
+    let from_constructor =
+      match ty.desc with
+      | Tconstr (_, _, _) -> not (Ast_uncurried_utils.type_is_uncurried_fun ty)
+      | _ -> false
+    in
+    (arity, from_constructor)
+  | None -> (arity_from_arrow_type env core_type ty, false)
 
 (* Translate a value declaration *)
 let transl_value_decl env loc valdecl =
@@ -1863,34 +1829,8 @@ let transl_value_decl env loc valdecl =
       }
     | [] -> raise (Error (valdecl.pval_loc, Val_in_structure))
     | _ ->
-      let native_repr_args, native_repr_res =
-        let rec scann (attrs : Parsetree.attributes) =
-          match attrs with
-          | ( {txt = "internal.arity"; _},
-              PStr
-                [
-                  {
-                    pstr_desc =
-                      Pstr_eval
-                        ( ({pexp_desc = Pexp_constant (Pconst_integer (i, _))} :
-                            Parsetree.expression),
-                          _ );
-                  };
-                ] )
-            :: _ ->
-            Some (int_of_string i)
-          | _ :: rest -> scann rest
-          | [] -> None
-        and make n =
-          if n = 0 then [] else Primitive.Same_as_ocaml_repr :: make (n - 1)
-        in
-        match scann valdecl.pval_attributes with
-        | None -> parse_native_repr_attributes env valdecl.pval_type ty
-        | Some x -> (make x, Primitive.Same_as_ocaml_repr)
-      in
-      let prim =
-        Primitive.parse_declaration valdecl ~native_repr_args ~native_repr_res
-      in
+      let arity, from_constructor = parse_arity env valdecl.pval_type ty in
+      let prim = Primitive.parse_declaration valdecl ~arity ~from_constructor in
       let prim_native_name = prim.prim_native_name in
       if
         prim.prim_arity = 0
@@ -2292,6 +2232,10 @@ let report_error ppf = function
      ^ other_variant_text
      ^ ". Both variants must have the same @tag attribute configuration, or no \
         @tag attribute at all")
+  | Variant_spread_fail Variant_type_spread.InvalidType ->
+    fprintf ppf
+      "@[This type is not a valid type to spread. It's only possible to spread \
+       other variants.@]"
   | Variant_spread_fail Variant_type_spread.CouldNotFindType ->
     fprintf ppf
       "@[This type could not be found. It's only possible to spread variants \
